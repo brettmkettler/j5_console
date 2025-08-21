@@ -1,0 +1,23 @@
+[Unit]
+Description=J5 Console API Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=seanfuchs
+Group=seanfuchs
+WorkingDirectory=/home/seanfuchs/Desktop
+Environment=PATH=/home/seanfuchs/Desktop/venv/bin
+ExecStart=/home/seanfuchs/Desktop/venv/bin/python /home/seanfuchs/Desktop/j5_console.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=j5-console
+
+# GPIO access permissions
+SupplementaryGroups=gpio
+
+[Install]
+WantedBy=multi-user.target
