@@ -84,35 +84,49 @@ def blink_orange_lamp():
             orange_lamp.off()
             time.sleep(1)
 
-# Function for malfunction state - red lamp flashes every 0.5s, malfunction LEDs cycle
+# Function for malfunction state - red and orange lamps flash every 0.5s, malfunction LEDs flash every 3s
 def malfunction_sequence():
+    malfunction_led_timer = 0
+    lamp_state = False  # Track current state of lamps
+    
     while not malfunction_stop_event.is_set():
-        # Red lamp flashes every 0.5s
-        red_lamp.on()
-        time.sleep(0.5)
-        if malfunction_stop_event.is_set():
-            break
-        red_lamp.off()
-        time.sleep(0.5)
-        if malfunction_stop_event.is_set():
-            break
-            
-        # Malfunction LEDs cycle (2s on, 0.5s off)
-        malfunction_led1.on()
-        malfunction_led2.on()
+        # Flash red and orange lamps every 0.5 seconds
+        if lamp_state:
+            red_lamp.on()
+            orange_lamp.on()
+        else:
+            red_lamp.off()
+            orange_lamp.off()
         
-        # Check for stop every 0.1s during the 2s on period
-        for _ in range(20):
+        lamp_state = not lamp_state  # Toggle lamp state
+        
+        # Flash malfunction LEDs every 3 seconds for 0.5 seconds
+        if malfunction_led_timer >= 3.0:
+            # Turn on malfunction LEDs for 0.5 seconds
+            malfunction_led1.on()
+            malfunction_led2.on()
+            
+            # Wait 0.5 seconds (but check for stop event)
+            for _ in range(5):  # 5 * 0.1s = 0.5s
+                if malfunction_stop_event.is_set():
+                    break
+                time.sleep(0.1)
+            
+            # Turn off malfunction LEDs
+            malfunction_led1.off()
+            malfunction_led2.off()
+            
+            # Reset timer
+            malfunction_led_timer = 0
+        
+        # Wait 0.5 seconds for lamp timing (but check for stop event)
+        for _ in range(5):  # 5 * 0.1s = 0.5s
             if malfunction_stop_event.is_set():
                 break
             time.sleep(0.1)
         
-        if malfunction_stop_event.is_set():
-            break
-            
-        malfunction_led1.off()
-        malfunction_led2.off()
-        time.sleep(0.5)
+        # Increment malfunction LED timer
+        malfunction_led_timer += 0.5
 
 # Function to set system state
 def set_state(new_state):
@@ -264,44 +278,54 @@ def activation_sequence():
     for device in digital_outputs.values():
         device.off()
     
-    # Pulsing orange lamp (fade simulation with on/off)
-    for _ in range(3):
-        orange_lamp.on()
-        time.sleep(0.2)
-        orange_lamp.off()
-        time.sleep(0.2)
-
-    # Sequential startup LED flash
-    for _ in range(3):
-        startup_led.on()
-        time.sleep(0.3)
-        startup_led.off()
-        time.sleep(0.2)
-
-    # Gradual door opening (0 to 90 degrees)
-    for angle in range(0, 91, 10):
-        for device in door_devices.values():
-            device.value = (2.5 + (angle / 18.0)) / 100
-        time.sleep(0.1)
-
-    # Flash all lights
-    red_lamp.on()
-    other2.on()
+    # Step 1: Light up the Startup LEDs and keep them on
+    print("Step 1: Lighting up startup LEDs")
+    startup_led.on()
     malfunction_led1.on()
     malfunction_led2.on()
-    time.sleep(1)
-
-    # Gradual door closing (90 to 0 degrees)
-    for angle in range(90, -1, -10):
-        for device in door_devices.values():
-            device.value = (2.5 + (angle / 18.0)) / 100
-        time.sleep(0.1)
-
-    # Turn off all lights
-    for device in digital_outputs.values():
-        device.off()
+    time.sleep(1)  # Keep them on for a moment
     
-    print("Activation sequence complete.")
+    # Step 2: Blink the red and orange lamps back and forth
+    print("Step 2: Blinking red and orange lamps back and forth")
+    for _ in range(6):  # 6 cycles = 12 blinks total
+        red_lamp.on()
+        orange_lamp.off()
+        time.sleep(0.5)
+        red_lamp.off()
+        orange_lamp.on()
+        time.sleep(0.5)
+    
+    # Turn off both lamps after the sequence
+    red_lamp.off()
+    orange_lamp.off()
+    
+    # Step 3: Blink the Startup LEDs off and on 3 times
+    print("Step 3: Blinking startup LEDs 3 times")
+    for _ in range(3):
+        # Turn off all startup LEDs
+        startup_led.off()
+        malfunction_led1.off()
+        malfunction_led2.off()
+        time.sleep(0.5)
+        
+        # Turn on all startup LEDs
+        startup_led.on()
+        malfunction_led1.on()
+        malfunction_led2.on()
+        time.sleep(0.5)
+    
+    # Step 4: Keep startup LED on for 5 seconds
+    print("Step 4: Keeping startup LED on for 5 seconds")
+    # Turn off malfunction LEDs, keep only startup LED
+    malfunction_led1.off()
+    malfunction_led2.off()
+    startup_led.on()
+    time.sleep(5)
+    
+    # Turn off startup LED before transitioning to activated state
+    startup_led.off()
+    
+    print("Activation sequence complete - transitioning to activated state")
 
 # Deactivation sequence with malfunction effects
 def deactivation_sequence():
@@ -312,17 +336,64 @@ def deactivation_sequence():
     malfunction_stop_event.set()
     time.sleep(0.1)
     
-    # Start malfunction state temporarily
-    set_state("malfunction")
+    # Turn off all lights first
+    for device in digital_outputs.values():
+        device.off()
     
-    # Let malfunction run for a few seconds
-    time.sleep(3)
+    # Step 1: Flash startup LEDs and malfunction LEDs for 4 seconds
+    print("Step 1: Flashing startup and malfunction LEDs for 4 seconds")
+    start_time = time.time()
+    while time.time() - start_time < 4.0:
+        # Turn on startup and malfunction LEDs
+        startup_led.on()
+        malfunction_led1.on()
+        malfunction_led2.on()
+        time.sleep(0.3)
+        
+        # Turn off startup and malfunction LEDs
+        startup_led.off()
+        malfunction_led1.off()
+        malfunction_led2.off()
+        time.sleep(0.3)
     
-    # Shutdown sequence - flash all lights rapidly
-    for _ in range(5):
+    # Step 2: Light both red and orange lamps and both startup and malfunction LEDs on for 5 seconds
+    print("Step 2: Lighting all lamps and LEDs for 5 seconds")
+    red_lamp.on()
+    orange_lamp.on()
+    startup_led.on()
+    malfunction_led1.on()
+    malfunction_led2.on()
+    time.sleep(5)
+    
+    # Step 3: Turn them off in order every 2 seconds: startup LED, malfunction LEDs, red lamp, orange lamp
+    print("Step 3: Turning off lights in sequence")
+    
+    # Turn off startup LED
+    startup_led.off()
+    time.sleep(2)
+    
+    # Turn off malfunction LEDs
+    malfunction_led1.off()
+    malfunction_led2.off()
+    time.sleep(2)
+    
+    # Turn off red lamp
+    red_lamp.off()
+    time.sleep(2)
+    
+    # Turn off orange lamp
+    orange_lamp.off()
+    time.sleep(1)  # Brief pause before final flash
+    
+    # Step 4: Quickly flash all lights off and on 2 times then all off
+    print("Step 4: Final flash sequence")
+    for _ in range(2):
+        # Turn on all lights
         for device in digital_outputs.values():
             device.on()
         time.sleep(0.2)
+        
+        # Turn off all lights
         for device in digital_outputs.values():
             device.off()
         time.sleep(0.2)
