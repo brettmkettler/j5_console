@@ -191,6 +191,14 @@ red_toggle_active = False
 orange_flash_thread = None
 orange_flash_stop_event = Event()
 
+# IR receiver debouncing
+last_ir_time = 0
+ir_debounce_delay = 2.0  # 2 seconds between IR signals
+
+# Red toggle switch debouncing
+last_toggle_time = 0
+toggle_debounce_delay = 1.0  # 1 second between toggle events
+
 # Events to control blinking threads
 blink_stop_event = Event()
 malfunction_stop_event = Event()
@@ -323,9 +331,14 @@ def set_servo_angle(name, angle):
         
         print(f"⚙️ {config['description']}: {angle}° (pulse: {pulse_width:.2f}ms, duty: {duty_cycle:.1f}%)")
         
+        # Wait for servo to reach position (typical servo takes 0.5-1s for 180° movement)
+        time.sleep(0.8)
         
-        # Small delay to ensure the command is processed
-        time.sleep(0.05)
+        # Disable servo to prevent jittering (set to None stops PWM signal)
+        config['device'].value = None
+        logger.debug(f"Servo {name} PWM disabled to prevent jittering")
+        print(f"🔇 {config['description']} PWM disabled to prevent jittering")
+        
         logger.debug(f"Servo {name} position set successfully")
         return True
     except Exception as e:
@@ -1102,10 +1115,10 @@ def red_toggle_off():
         logger.info("All lamps and LEDs turned off")
         print("✅ All lamps and LEDs OFF")
         
-        # Wait 5 seconds before closing console door
-        logger.info("Waiting 5 seconds before closing console door...")
-        print("⏱️ Waiting 5 seconds before closing console door...")
-        time.sleep(5)
+        # Wait 3 seconds before closing console door
+        logger.info("Waiting 3 seconds before closing console door...")
+        print("⏱️ Waiting 3 seconds before closing console door...")
+        time.sleep(3)
         
         # Close the console door
         logger.info("Closing console door")
@@ -1307,19 +1320,57 @@ def input_monitor():
     # Set up IR receiver callback
     if ir_receiver is not None:
         def ir_signal_received():
-            logger.info("IR signal received - opening console door")
-            print("🔴 IR signal received - opening console door")
+            global door_states, last_ir_time
+            current_time = time.time()
+            
+            # Debouncing: ignore signals that come too quickly
+            if current_time - last_ir_time < ir_debounce_delay:
+                logger.debug(f"IR signal ignored - debounce active ({current_time - last_ir_time:.2f}s since last)")
+                print(f"🔴 IR signal ignored - debounce active ({current_time - last_ir_time:.2f}s since last)")
+                return
+            
+            last_ir_time = current_time
+            current_state = door_states['console_door']
+            logger.info(f"IR signal accepted - console door is {current_state}")
+            print(f"🔴 IR signal accepted - console door is {current_state}")
+            
+            def ir_door_operation():
+                """Execute door operation in separate thread"""
+                try:
+                    if current_state == 'closed':
+                        # Door is closed, call open function directly
+                        logger.info("IR thread: Calling open_console_door() function")
+                        print("🔓 IR thread: Calling open_console_door() function")
+                        result = open_console_door()
+                        if result:
+                            logger.info("Console door opened successfully via IR signal")
+                            print("✅ Console door opened successfully via IR signal")
+                        else:
+                            logger.error("Failed to open console door via IR signal")
+                            print("❌ Failed to open console door via IR signal")
+                    else:
+                        # Door is open, call close function directly
+                        logger.info("IR thread: Calling close_console_door() function")
+                        print("🔒 IR thread: Calling close_console_door() function")
+                        result = close_console_door()
+                        if result:
+                            logger.info("Console door closed successfully via IR signal")
+                            print("✅ Console door closed successfully via IR signal")
+                        else:
+                            logger.error("Failed to close console door via IR signal")
+                            print("❌ Failed to close console door via IR signal")
+                except Exception as e:
+                    logger.error(f"Error in IR door operation thread: {e}")
+                    print(f"❌ Error in IR door operation thread: {e}")
+            
             try:
-                result = open_console_door()
-                if result:
-                    logger.info("Console door opened successfully via IR signal")
-                    print("✅ Console door opened successfully via IR signal")
-                else:
-                    logger.error("Failed to open console door via IR signal")
-                    print("❌ Failed to open console door via IR signal")
+                # Run door operation in separate thread to avoid interrupt context issues
+                ir_thread = Thread(target=ir_door_operation, daemon=True)
+                ir_thread.start()
+                logger.info("IR door operation thread started")
             except Exception as e:
-                logger.error(f"Error opening console door via IR: {e}")
-                print(f"❌ Error opening console door via IR: {e}")
+                logger.error(f"Error starting IR door operation thread: {e}")
+                print(f"❌ Error starting IR door operation thread: {e}")
         
         # Attach the callback to the IR receiver
         ir_receiver.when_pressed = ir_signal_received
@@ -1329,6 +1380,16 @@ def input_monitor():
     # Set up red toggle switch callbacks
     if red_toggle_switch is not None:
         def red_toggle_pressed():
+            global last_toggle_time
+            current_time = time.time()
+            
+            # Debouncing: ignore rapid toggle events
+            if current_time - last_toggle_time < toggle_debounce_delay:
+                logger.debug(f"Red toggle PRESSED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
+                print(f"🔴 Red toggle PRESSED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
+                return
+            
+            last_toggle_time = current_time
             logger.info("Red toggle switch pressed (activated)")
             print("🔴 Red toggle switch PRESSED - starting sequence")
             try:
@@ -1340,6 +1401,16 @@ def input_monitor():
                 print(f"❌ Error starting red toggle sequence: {e}")
         
         def red_toggle_released():
+            global last_toggle_time
+            current_time = time.time()
+            
+            # Debouncing: ignore rapid toggle events
+            if current_time - last_toggle_time < toggle_debounce_delay:
+                logger.debug(f"Red toggle RELEASED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
+                print(f"🔴 Red toggle RELEASED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
+                return
+            
+            last_toggle_time = current_time
             logger.info("Red toggle switch released (deactivated)")
             print("🔴 Red toggle switch RELEASED - starting shutdown sequence")
             try:
