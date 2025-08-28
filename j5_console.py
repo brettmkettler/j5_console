@@ -1,5 +1,4 @@
-from gpiozero import Button, LED, PWMOutputDevice
-from gpiozero.pins.rpigpio import RPiGPIOFactory
+from gpiozero import Button, LED, PWMOutputDevice, Servo
 from flask import Flask, request
 from flask_restx import Api, Resource, fields, reqparse
 from threading import Thread, Event
@@ -58,66 +57,61 @@ def check_and_release_gpio_pins(pin_numbers):
         print(f"Error checking GPIO usage: {e}")
         # Continue anyway - GPIO initialization will fail if pins are busy
 
-# Use RPiGPIO pin factory for better compatibility with SET_BIAS_DISABLE
-pin_factory = RPiGPIOFactory()
-
 # Initialize GPIO pins - fail fast if devices can't be initialized
 
 # First check and release any conflicting pins
-# Added pin 26 for red toggle switch, pin 18 (IR receiver) is enabled
-check_and_release_gpio_pins([5, 6, 12, 16, 18, 19, 26, 27, 22, 24])
+# GPIO pin 26 not available on this Pi model, pin 18 (IR receiver) is enabled
+check_and_release_gpio_pins([5, 6, 12, 16, 18, 19, 27, 22, 24])
 
 # Initialize each device individually
-# Red toggle switch on GPIO 26 and IR receiver on pin 18 are both enabled
-red_toggle_switch = Button(26, pull_up=True, pin_factory=pin_factory)
-logger.info(f"Successfully initialized red_toggle_switch on GPIO 26: {red_toggle_switch}")
+# GPIO pin 26 not available on this Pi model - commented out
+# red_toggle_switch = Button(26, pull_up=True)
+# logger.info(f"Successfully initialized red_toggle_switch on GPIO 26: {red_toggle_switch}")
 
 # IR receiver on GPIO 18 (Pin 12) - for automatic door control
-ir_receiver = Button(18, pull_up=True, pin_factory=pin_factory)
+ir_receiver = Button(18, pull_up=True)
 logger.info(f"Successfully initialized ir_receiver on GPIO 18: {ir_receiver}")
 
-# Legacy button variable for compatibility
-button = red_toggle_switch
+# Legacy button variable for compatibility - set to None since GPIO 26 not available
+button = None
 
 # Initialize LED devices
-orange_lamp = LED(5, pin_factory=pin_factory)
+orange_lamp = LED(5)
 logger.info(f"Successfully initialized orange_lamp on GPIO 5: {orange_lamp}")
 
-red_lamp = LED(6, pin_factory=pin_factory)
+red_lamp = LED(6)
 logger.info(f"Successfully initialized red_lamp on GPIO 6: {red_lamp}")
 
 # Initialize servo devices using Servo class for better Pi 5 compatibility
-from gpiozero import Servo
-
-left_door = Servo(12, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000, pin_factory=pin_factory)
+left_door = Servo(12, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000)
 left_door.value = None  # Disable PWM on startup - servo stays in current position
 logger.info(f"Successfully initialized left_door servo on GPIO 12: {left_door}")
 
 # Initialize console_door servo device
 logger.info("Initializing console_door servo on GPIO pin 16")
-console_door = Servo(16, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000, pin_factory=pin_factory)
+console_door = Servo(16, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000)
 console_door.value = None  # Disable PWM on startup - servo stays in current position
 logger.info(f"Successfully initialized console_door servo: {console_door}, type: {type(console_door)}")
 
 # Initialize right_door servo device
-right_door = Servo(19, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000, pin_factory=pin_factory)
+right_door = Servo(19, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000)
 right_door.value = None  # Disable PWM on startup - servo stays in current position
 logger.info(f"Successfully initialized right_door servo on GPIO 19: {right_door}")
 
 # Startup indicator LEDs (3 LEDs in series) - GPIO 27 Pin 13 
-startup_led = LED(27, pin_factory=pin_factory)
+startup_led = LED(27)
 logger.info(f"Successfully initialized startup_led on GPIO 27: {startup_led}")
 
 # Malfunction indicator LEDs (3 LEDs in series) - GPIO 22 Pin 15  
-malfunction_led1 = LED(22, pin_factory=pin_factory)
+malfunction_led1 = LED(22)
 logger.info(f"Successfully initialized malfunction_led1 on GPIO 22: {malfunction_led1}")
 
 # Remove malfunction_led2 as it's duplicate - only one malfunction LED group in diagram
-# malfunction_led2 = LED(22, pin_factory=pin_factory)
+# malfunction_led2 = LED(22)
 # logger.info(f"Successfully initialized malfunction_led2 on GPIO 22: {malfunction_led2}")
 
 # GPIO 24 Pin 18 - Connected to 230 Ohm +3.3v Pin 17 with White Wires
-other2 = LED(24, pin_factory=pin_factory)
+other2 = LED(24)
 logger.info(f"Successfully initialized other2 on GPIO 24: {other2}")
 
 logger.info("GPIO initialization complete - all devices initialized successfully")
