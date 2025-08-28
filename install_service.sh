@@ -15,7 +15,7 @@ fi
 # Check if service file exists
 if [ ! -f "j5-console.service" ]; then
     echo "❌ Service file 'j5-console.service' not found!"
-    echo "Make sure you're running this from the Desktop directory"
+    echo "Make sure you're running this from the Desktop/j5_console directory"
     exit 1
 fi
 

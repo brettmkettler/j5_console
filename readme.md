@@ -4,7 +4,7 @@
 
 1. **Copy files to your Raspberry Pi Desktop:**
    ```bash
-   # Make sure these files are in ~/Desktop/:
+   # Make sure these files are in ~/Desktop/j5_console/:
    # - j5_console.py
    # - j5-console.service  
    # - install_service.sh
@@ -13,7 +13,7 @@
 
 2. **Run the installation script:**
    ```bash
-   cd ~/Desktop
+   cd ~/Desktop/j5_console
    sudo bash install_service.sh
    ```
 
@@ -88,8 +88,8 @@ sudo journalctl -u j5-console
 ### **Service won't start:**
 1. Check logs: `sudo journalctl -u j5-console`
 2. Verify paths in service file
-3. Check virtual environment exists: `ls ~/Desktop/venv/bin/python`
-4. Test manually: `cd ~/Desktop && source venv/bin/activate && python j5_console.py`
+3. Check virtual environment exists: `ls ~/Desktop/j5_console/venv/bin/python`
+4. Test manually: `cd ~/Desktop/j5_console && source venv/bin/activate && python j5_console.py`
 
 ### **GPIO permissions:**
 If you get GPIO permission errors:
@@ -119,7 +119,7 @@ Once running, access your console at:
 crontab -e
 
 # Add this line:
-@reboot cd /home/seanfuchs/Desktop && source venv/bin/activate && python j5_console.py &
+@reboot cd /home/seanfuchs/Desktop/j5_console && source venv/bin/activate && python j5_console.py &
 ```
 
 ### **Method 3: rc.local (Legacy)**
@@ -128,7 +128,7 @@ crontab -e
 sudo nano /etc/rc.local
 
 # Add before 'exit 0':
-su - seanfuchs -c "cd /home/seanfuchs/Desktop && source venv/bin/activate && python j5_console.py &"
+su - seanfuchs -c "cd /home/seanfuchs/Desktop/j5_console && source venv/bin/activate && python j5_console.py &"
 ```
 
 ---
