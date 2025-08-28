@@ -5,6 +5,18 @@
 
 echo "🚀 Starting J5 Console Kiosk..."
 
+# Get the actual user (not root if using sudo)
+if [ -n "$SUDO_USER" ]; then
+    ACTUAL_USER="$SUDO_USER"
+    USER_HOME="/home/$SUDO_USER"
+else
+    ACTUAL_USER="$(whoami)"
+    USER_HOME="$HOME"
+fi
+
+echo "👤 Running as: $ACTUAL_USER"
+echo "🏠 Home directory: $USER_HOME"
+
 # Kill any existing processes
 pkill -f j5_console.py 2>/dev/null || true
 pkill -f "node.*BtBmsDisplay" 2>/dev/null || true
@@ -15,8 +27,8 @@ sleep 2
 
 # Start j5_console.py in background
 echo "📡 Starting J5 Console API..."
-cd ~/Desktop/j5_console
-source venv/bin/activate
+cd "$USER_HOME/Desktop/j5_console"
+source "$USER_HOME/Desktop/venv/bin/activate"
 python j5_console.py &
 J5_PID=$!
 
@@ -25,7 +37,7 @@ sleep 5
 
 # Start BtBmsDisplay in background
 echo "🖥️ Starting BtBmsDisplay..."
-cd ~/Desktop/j5_console/BtBmsDisplay
+cd "$USER_HOME/Desktop/j5_console/BtBmsDisplay"
 npm start &
 DISPLAY_PID=$!
 
