@@ -1,5 +1,5 @@
 from gpiozero import Button, LED, PWMOutputDevice
-from gpiozero.pins.lgpio import LGPIOFactory
+from gpiozero.pins.rpigpio import RPiGPIOFactory
 from flask import Flask, request
 from flask_restx import Api, Resource, fields, reqparse
 from threading import Thread, Event
@@ -58,8 +58,8 @@ def check_and_release_gpio_pins(pin_numbers):
         print(f"Error checking GPIO usage: {e}")
         # Continue anyway - GPIO initialization will fail if pins are busy
 
-# Use LGPIO pin factory for better performance on Raspberry Pi
-pin_factory = LGPIOFactory()
+# Use RPiGPIO pin factory for better compatibility with SET_BIAS_DISABLE
+pin_factory = RPiGPIOFactory()
 
 # Initialize GPIO pins - fail fast if devices can't be initialized
 
