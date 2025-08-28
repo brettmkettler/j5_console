@@ -17,13 +17,15 @@ fi
 echo "👤 Running as: $ACTUAL_USER"
 echo "🏠 Home directory: $USER_HOME"
 
-# Kill any existing processes
+# Kill any existing processes including GPIO processes
+echo "🧹 Cleaning up existing processes..."
 pkill -f j5_console.py 2>/dev/null || true
 pkill -f "node.*BtBmsDisplay" 2>/dev/null || true
 pkill -f chromium-browser 2>/dev/null || true
+pkill -f "python.*j5_console" 2>/dev/null || true
 
-# Wait a moment
-sleep 2
+# Wait for processes to fully terminate
+sleep 3
 
 # Start j5_console.py in background
 echo "📡 Starting J5 Console API..."
@@ -33,17 +35,17 @@ python j5_console.py &
 J5_PID=$!
 
 # Wait for API to start
-sleep 5
+sleep 8
 
-# Start BtBmsDisplay in background
+# Start BtBmsDisplay in background using npm run dev for better compatibility
 echo "🖥️ Starting BtBmsDisplay..."
 cd "$USER_HOME/Desktop/j5_console/BtBmsDisplay"
-npm start &
+npm run dev &
 DISPLAY_PID=$!
 
 # Wait for web server to start
 echo "⏳ Waiting for services to start..."
-sleep 10
+sleep 15
 
 # Check if services are running
 if ! curl -s http://localhost:5000/api/system/status >/dev/null 2>&1; then

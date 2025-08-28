@@ -69,14 +69,16 @@ check_and_release_gpio_pins([5, 6, 12, 16, 18, 19, 26, 27, 22, 24])
 
 # Initialize each device individually
 # Red toggle switch on GPIO 26 and IR receiver on pin 18 are both enabled
-red_toggle_switch = Button(26, pull_up=True, pin_factory=pin_factory)
-logger.info(f"Successfully initialized red toggle switch on GPIO 26: {red_toggle_switch}")
+# Initialize button device (commented out - in use by other process)
+# red_toggle_switch = Button(26, pull_up=True, pin_factory=pin_factory)
+# logger.info(f"Successfully initialized red_toggle_switch on GPIO 26: {red_toggle_switch}")
 
+# IR receiver on GPIO 18 (Pin 12) - for automatic door control
 ir_receiver = Button(18, pull_up=True, pin_factory=pin_factory)
-logger.info(f"Successfully initialized IR receiver on GPIO 18: {ir_receiver}")
+logger.info(f"Successfully initialized ir_receiver on GPIO 18: {ir_receiver}")
 
 # Legacy button variable for compatibility
-button = red_toggle_switch
+button = None
 
 # Initialize LED devices
 orange_lamp = LED(5, pin_factory=pin_factory)
