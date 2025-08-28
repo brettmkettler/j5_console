@@ -103,7 +103,7 @@ right_door = Servo(19, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000, pin_f
 right_door.value = None  # Disable PWM on startup - servo stays in current position
 logger.info(f"Successfully initialized right_door servo on GPIO 19: {right_door}")
 
-# Startup indicator LEDs (3 LEDs in series) - GPIO 27 Pin 13
+# Startup indicator LEDs (3 LEDs in series) - GPIO 27 Pin 13 
 startup_led = LED(27, pin_factory=pin_factory)
 logger.info(f"Successfully initialized startup_led on GPIO 27: {startup_led}")
 
