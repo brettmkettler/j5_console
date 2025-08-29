@@ -59,11 +59,20 @@ chmod 644 /etc/systemd/system/j5-console.service
 echo "📋 Setting up BtBmsDisplay..."
 cd BtBmsDisplay
 
+# Clean any existing build artifacts and fix permissions
+echo "  Cleaning build directory..."
+if [ -d "dist" ]; then
+    rm -rf dist
+fi
+
 # Install npm dependencies
 echo "  Installing npm dependencies..."
 sudo -u $ACTUAL_USER npm install
 
-# Build application
+# Ensure proper ownership of the entire BtBmsDisplay directory
+chown -R $ACTUAL_USER:$ACTUAL_USER .
+
+# Build application as the actual user
 echo "  Building application..."
 sudo -u $ACTUAL_USER npm run build
 
