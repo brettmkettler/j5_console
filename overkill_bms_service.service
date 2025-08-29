@@ -1,0 +1,19 @@
+[Unit]
+Description=Overkill Solar BMS Bluetooth Integration Service
+After=network.target bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=simple
+User=seanfuchs
+Group=seanfuchs
+WorkingDirectory=/home/seanfuchs/Desktop/j5_console
+Environment=PATH=/home/seanfuchs/Desktop/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/seanfuchs/Desktop/venv/bin/python overkill_bms_service.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
