@@ -1,7 +1,8 @@
 [Unit]
 Description=J5 Console API Service
-After=network.target
+After=network.target overkill-bms-service.service
 Wants=network.target
+Requires=overkill-bms-service.service
 
 [Service]
 Type=simple
