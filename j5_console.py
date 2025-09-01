@@ -1263,6 +1263,218 @@ def red_toggle_off():
         logger.error(f"Error in red toggle shutdown sequence: {e}")
         print(f"❌ Error in shutdown sequence: {e}")
 
+# IR door operation function
+def ir_door_operation():
+    """Execute door operation in separate thread"""
+    global door_states
+    try:
+        current_state = door_states['console_door']
+        if current_state == 'closed':
+            logger.info("IR triggered - opening console door")
+            print("� IR triggered - opening console door")
+            open_console_door()
+        elif current_state == 'open':
+            logger.info("IR triggered - closing console door")
+            print("� IR triggered - closing console door")
+            close_console_door()
+        else:
+            logger.info(f"IR triggered - current state: {current_state}")
+            print(f"🚪 IR triggered - current state: {current_state}")
+    except Exception as e:
+        logger.error(f"Error in IR door operation: {e}")
+        print(f"❌ Error in IR door operation: {e}")
+
+# Button and IR receiver monitoring thread
+def input_monitor():
+    logger.info("Input monitoring started (GPIO 26 red toggle switch, GPIO 18 IR receiver enabled)")
+    print("Input monitoring started (GPIO 26 red toggle switch, GPIO 18 IR receiver enabled)")
+    
+    # Set up IR receiver callback
+    if ir_receiver is not None:
+        def ir_signal_received():
+            global door_states, last_ir_time, ir_learning_mode, ir_learning_start_time, learned_ir_signal
+            current_time = time.time()
+            
+            print(f"🔴 IR signal received at {current_time}")
+            logger.info(f"IR signal received at {current_time}")
+            
+            # Check if we're in learning mode
+            if ir_learning_mode:
+                # Check if learning has timed out
+                if current_time - ir_learning_start_time > ir_learning_timeout:
+                    ir_learning_mode = False
+                    logger.info("IR learning mode timed out")
+                    print("🔴 IR learning mode timed out")
+                    return
+                
+                # Learn this signal
+                learned_ir_signal = current_time
+                ir_learning_mode = False
+                
+                logger.info(f"IR signal learned successfully at {current_time}")
+                print(f"✅ IR signal learned successfully! Signal will now control console door.")
+                
+                # Save the learned signal
+                if save_learned_ir_signal(learned_ir_signal):
+                    print(f"💾 IR signal saved and will persist across restarts")
+                else:
+                    print(f"⚠️ IR signal learned but failed to save to file")
+                return
+            
+            # Normal operation mode - check if we have a learned signal
+            if learned_ir_signal is None:
+                logger.debug("No learned IR signal - ignoring")
+                print("🔴 No learned IR signal - ignoring")
+                return
+            
+            # Debouncing check
+            if current_time - last_ir_time < ir_debounce_delay:
+                logger.debug(f"IR signal ignored - debounce active")
+                print(f"🔴 IR signal ignored - debounce active")
+                return
+            
+            # Execute door operation
+            last_ir_time = current_time
+            ir_thread = Thread(target=ir_door_operation, daemon=True)
+            ir_thread.start()
+
+    # Attach the callback to the IR receiver
+    ir_receiver.when_pressed = ir_signal_received
+    logger.info("IR receiver callback attached")
+    print("🔴 IR receiver callback attached - ready to receive signals")
+    
+    # Set up red toggle switch callbacks
+    if red_toggle_switch is not None:
+        def red_toggle_pressed():
+            global last_toggle_time
+            current_time = time.time()
+            
+            # Debouncing: ignore rapid toggle events
+            if current_time - last_toggle_time < toggle_debounce_delay:
+                logger.debug(f"Red toggle PRESSED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
+                print(f"🔴 Red toggle PRESSED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
+                return
+            
+            last_toggle_time = current_time
+            logger.info("Red toggle switch pressed (activated)")
+            print("🔴 Red toggle switch PRESSED - starting sequence")
+            try:
+                # Run the sequence in a separate thread to avoid blocking
+                toggle_thread = Thread(target=red_toggle_sequence, daemon=True)
+                toggle_thread.start()
+            except Exception as e:
+                logger.error(f"Error starting red toggle sequence: {e}")
+                print(f"❌ Error starting red toggle sequence: {e}")
+        
+        def red_toggle_released():
+            global last_toggle_time
+            current_time = time.time()
+            
+            # Debouncing: ignore rapid toggle events
+            if current_time - last_toggle_time < toggle_debounce_delay:
+                logger.debug(f"Red toggle RELEASED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
+                print(f"🔴 Red toggle RELEASED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
+                return
+            
+            last_toggle_time = current_time
+            logger.info("Red toggle switch released (deactivated)")
+            print("🔴 Red toggle switch RELEASED - starting shutdown sequence")
+            try:
+                # Run the shutdown sequence in a separate thread to avoid blocking
+                shutdown_thread = Thread(target=red_toggle_off, daemon=True)
+                shutdown_thread.start()
+            except Exception as e:
+                logger.error(f"Error starting red toggle shutdown sequence: {e}")
+                print(f"❌ Error starting red toggle shutdown sequence: {e}")
+        
+        # Attach the callbacks to the red toggle switch
+        red_toggle_switch.when_pressed = red_toggle_pressed
+        red_toggle_switch.when_released = red_toggle_released
+        logger.info("Red toggle switch callbacks attached")
+        print("🔴 Red toggle switch callbacks attached - ready for activation")
+    
+    try:
+        while True:
+            try:
+                # GPIO 26 (button) is disabled, GPIO 18 (IR receiver) is active
+                # IR receiver uses callback, so we just need to keep the thread alive
+                pass
+            except Exception as e:
+                logger.error(f"Error in input monitoring: {e}")
+                print(f"Error in input monitoring: {e}")
+            
+            time.sleep(0.1)  # Check every 100ms
+    except KeyboardInterrupt:
+        logger.info("Input monitoring stopped")
+        print("Input monitoring stopped")
+    except Exception as e:
+        logger.error(f"Input monitor thread error: {e}")
+        print(f"Input monitor thread error: {e}")
+
+# GPIO cleanup function
+def cleanup_gpio():
+    """Clean up GPIO resources"""
+    logger.info("Starting GPIO cleanup...")
+    print("Starting GPIO cleanup...")
+    
+    try:
+        # Stop all threads
+        blink_stop_event.set()
+        malfunction_stop_event.set()
+        stop_orange_flash()  # Stop orange lamp flashing
+        
+        # Close all GPIO devices
+        devices_to_close = [
+            orange_lamp, red_lamp, left_door, console_door, right_door,
+            startup_led, malfunction_led1, other2, ir_receiver, red_toggle_switch
+        ]
+        
+        for device in devices_to_close:
+            if device and hasattr(device, 'close'):
+                try:
+                    device.close()
+                    logger.debug(f"Closed device: {device}")
+                except Exception as e:
+                    logger.warning(f"Error closing device {device}: {e}")
+        
+        logger.info("GPIO cleanup completed")
+        print("GPIO cleanup completed")
+    except Exception as e:
+        logger.error(f"Error during GPIO cleanup: {e}")
+        print(f"Error during GPIO cleanup: {e}")
+
+# Signal handler for graceful shutdown
+def signal_handler(signum, frame):
+    """Handle shutdown signals"""
+    logger.info(f"Received signal {signum}, shutting down gracefully...")
+    print(f"\nReceived signal {signum}, shutting down gracefully...")
+    cleanup_gpio()
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
+signal.signal(signal.SIGTERM, signal_handler)  # systemctl stop
+
+if __name__ == '__main__':
+    try:
+        # Start input monitor in a thread
+        input_thread = Thread(target=input_monitor)
+        input_thread.daemon = True
+        input_thread.start()
+        
+        # Start Flask app
+        print("Starting J5 Console API on port 5000...")
+        # Disable debug mode to prevent Flask restarts that cause GPIO conflicts
+        app.run(host='0.0.0.0', port=5000, debug=False)
+    except Exception as e:
+        logger.error(f"Error starting application: {e}")
+        print(f"Error starting application: {e}")
+        cleanup_gpio()
+        sys.exit(1)
+    finally:
+        # Ensure cleanup happens even on normal exit
+        cleanup_gpio()
+
 # Functions to control console door
 def open_console_door():
     global door_states
@@ -1435,227 +1647,3 @@ def toggle_battery_doors():
         logger.debug("Both doors are open, closing both")
         print("Both doors are open, closing both...")
         return close_battery_doors()
-
-# Button and IR receiver monitoring thread
-def input_monitor():
-    logger.info("Input monitoring started (GPIO 26 red toggle switch, GPIO 18 IR receiver enabled)")
-    print("Input monitoring started (GPIO 26 red toggle switch, GPIO 18 IR receiver enabled)")
-    
-    # Set up IR receiver callback
-    if ir_receiver is not None:
-        def ir_signal_received():
-            global door_states, last_ir_time, ir_learning_mode, ir_learning_start_time, learned_ir_signal
-            current_time = time.time()
-            
-            print(f"🔴 IR signal received at {current_time}")
-            logger.info(f"IR signal received at {current_time}")
-            
-            # Check if we're in learning mode
-            if ir_learning_mode:
-                # Check if learning has timed out
-                if current_time - ir_learning_start_time > ir_learning_timeout:
-                    ir_learning_mode = False
-                    logger.info("IR learning mode timed out")
-                    print("🔴 IR learning mode timed out")
-                    return
-                
-                # Learn this signal
-                learned_ir_signal = current_time
-                ir_learning_mode = False
-                
-                logger.info(f"IR signal learned successfully at {current_time}")
-                print(f"✅ IR signal learned successfully! Signal will now control console door.")
-                
-                # Save the learned signal
-                if save_learned_ir_signal(learned_ir_signal):
-                    print(f"💾 IR signal saved and will persist across restarts")
-                else:
-                    print(f"⚠️ IR signal learned but failed to save to file")
-                return
-            
-            # Normal operation mode - check if we have a learned signal
-            if learned_ir_signal is None:
-                logger.debug("No learned IR signal - ignoring")
-                print("🔴 No learned IR signal - ignoring")
-                return
-            
-            # Debouncing check
-            if current_time - last_ir_time < ir_debounce_delay:
-                logger.debug(f"IR signal ignored - debounce active")
-                print(f"🔴 IR signal ignored - debounce active")
-                return
-            
-            # Execute door operation
-            last_ir_time = current_time
-            current_state = door_states['console_door']
-            
-            logger.info("IR signal matches learned signal - executing door operation")
-            print("✅ IR signal matches - executing door operation")
-            
-            def ir_door_operation():
-                """Execute door operation in separate thread"""
-                try:
-                    if current_state == 'closed':
-                        logger.info("IR thread: Opening console door")
-                        print("🔓 IR thread: Opening console door")
-                        result = open_console_door()
-                        if result:
-                            print("✅ Console door opened via IR")
-                        else:
-                            print("❌ Failed to open console door via IR")
-                    else:
-                        logger.info("IR thread: Closing console door")
-                        print("🔒 IR thread: Closing console door")
-                        result = close_console_door()
-                        if result:
-                            print("✅ Console door closed via IR")
-                        else:
-                            print("❌ Failed to close console door via IR")
-                except Exception as e:
-                    logger.error(f"Error in IR door operation: {e}")
-                    print(f"❌ Error in IR door operation: {e}")
-            
-            # Execute door operation in separate thread
-            ir_thread = Thread(target=ir_door_operation, daemon=True)
-            ir_thread.start()
-
-    # Execute door operation in separate thread
-    ir_thread = Thread(target=ir_door_operation, daemon=True)
-    ir_thread.start()
-
-    # Attach the callback to the IR receiver
-    ir_receiver.when_pressed = ir_signal_received
-    logger.info("IR receiver callback attached")
-    print("🔴 IR receiver callback attached - ready to receive signals")
-    
-    # Set up red toggle switch callbacks
-    if red_toggle_switch is not None:
-        def red_toggle_pressed():
-            global last_toggle_time
-            current_time = time.time()
-            
-            # Debouncing: ignore rapid toggle events
-            if current_time - last_toggle_time < toggle_debounce_delay:
-                logger.debug(f"Red toggle PRESSED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
-                print(f"🔴 Red toggle PRESSED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
-                return
-            
-            last_toggle_time = current_time
-            logger.info("Red toggle switch pressed (activated)")
-            print("🔴 Red toggle switch PRESSED - starting sequence")
-            try:
-                # Run the sequence in a separate thread to avoid blocking
-                toggle_thread = Thread(target=red_toggle_sequence, daemon=True)
-                toggle_thread.start()
-            except Exception as e:
-                logger.error(f"Error starting red toggle sequence: {e}")
-                print(f"❌ Error starting red toggle sequence: {e}")
-        
-        def red_toggle_released():
-            global last_toggle_time
-            current_time = time.time()
-            
-            # Debouncing: ignore rapid toggle events
-            if current_time - last_toggle_time < toggle_debounce_delay:
-                logger.debug(f"Red toggle RELEASED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
-                print(f"🔴 Red toggle RELEASED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
-                return
-            
-            last_toggle_time = current_time
-            logger.info("Red toggle switch released (deactivated)")
-            print("🔴 Red toggle switch RELEASED - starting shutdown sequence")
-            try:
-                # Run the shutdown sequence in a separate thread to avoid blocking
-                shutdown_thread = Thread(target=red_toggle_off, daemon=True)
-                shutdown_thread.start()
-            except Exception as e:
-                logger.error(f"Error starting red toggle shutdown sequence: {e}")
-                print(f"❌ Error starting red toggle shutdown sequence: {e}")
-        
-        # Attach the callbacks to the red toggle switch
-        red_toggle_switch.when_pressed = red_toggle_pressed
-        red_toggle_switch.when_released = red_toggle_released
-        logger.info("Red toggle switch callbacks attached")
-        print("🔴 Red toggle switch callbacks attached - ready for activation")
-    
-    try:
-        while True:
-            try:
-                # GPIO 26 (button) is disabled, GPIO 18 (IR receiver) is active
-                # IR receiver uses callback, so we just need to keep the thread alive
-                pass
-            except Exception as e:
-                logger.error(f"Error in input monitoring: {e}")
-                print(f"Error in input monitoring: {e}")
-            
-            time.sleep(0.1)  # Check every 100ms
-    except KeyboardInterrupt:
-        logger.info("Input monitoring stopped")
-        print("Input monitoring stopped")
-    except Exception as e:
-        logger.error(f"Input monitor thread error: {e}")
-        print(f"Input monitor thread error: {e}")
-
-# GPIO cleanup function
-def cleanup_gpio():
-    """Clean up GPIO resources"""
-    logger.info("Starting GPIO cleanup...")
-    print("Starting GPIO cleanup...")
-    
-    try:
-        # Stop all threads
-        blink_stop_event.set()
-        malfunction_stop_event.set()
-        stop_orange_flash()  # Stop orange lamp flashing
-        
-        # Close all GPIO devices
-        devices_to_close = [
-            orange_lamp, red_lamp, left_door, console_door, right_door,
-            startup_led, malfunction_led1, other2, ir_receiver, red_toggle_switch
-        ]
-        
-        for device in devices_to_close:
-            if device and hasattr(device, 'close'):
-                try:
-                    device.close()
-                    logger.debug(f"Closed device: {device}")
-                except Exception as e:
-                    logger.warning(f"Error closing device {device}: {e}")
-        
-        logger.info("GPIO cleanup completed")
-        print("GPIO cleanup completed")
-    except Exception as e:
-        logger.error(f"Error during GPIO cleanup: {e}")
-        print(f"Error during GPIO cleanup: {e}")
-
-# Signal handler for graceful shutdown
-def signal_handler(signum, frame):
-    """Handle shutdown signals"""
-    logger.info(f"Received signal {signum}, shutting down gracefully...")
-    print(f"\nReceived signal {signum}, shutting down gracefully...")
-    cleanup_gpio()
-    sys.exit(0)
-
-# Register signal handlers
-signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
-signal.signal(signal.SIGTERM, signal_handler)  # systemctl stop
-
-if __name__ == '__main__':
-    try:
-        # Start input monitor in a thread
-        input_thread = Thread(target=input_monitor)
-        input_thread.daemon = True
-        input_thread.start()
-        
-        # Start Flask app
-        print("Starting J5 Console API on port 5000...")
-        # Disable debug mode to prevent Flask restarts that cause GPIO conflicts
-        app.run(host='0.0.0.0', port=5000, debug=False)
-    except Exception as e:
-        logger.error(f"Error starting application: {e}")
-        print(f"Error starting application: {e}")
-        cleanup_gpio()
-        sys.exit(1)
-    finally:
-        # Ensure cleanup happens even on normal exit
-        cleanup_gpio()
