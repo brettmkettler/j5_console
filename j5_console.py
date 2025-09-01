@@ -205,14 +205,6 @@ ir_learning_mode = False
 ir_learning_timeout = 30.0  # 30 seconds timeout for learning
 ir_learning_start_time = 0
 learned_ir_signal = None
-ir_signal_pattern = []  # Store timing pattern of learned signal
-ir_pattern_tolerance = 0.05  # 50ms tolerance for pattern matching
-ir_pulse_times = []  # Track pulse timing for current signal
-ir_last_pulse_time = 0
-ir_pattern_timeout = 0.5  # 500ms timeout between pulses to end pattern
-
-# IR signal persistence file
-ir_signal_file = '/tmp/j5_learned_ir_signal.json'
 
 def save_learned_ir_signal(signal_data):
     """Save learned IR signal to persistent storage"""
@@ -222,10 +214,10 @@ def save_learned_ir_signal(signal_data):
             'timestamp': time.time(),
             'version': '1.0'
         }
-        with open(ir_signal_file, 'w') as f:
+        with open('/tmp/j5_learned_ir_signal.json', 'w') as f:
             json.dump(ir_data, f, indent=2)
-        logger.info(f"IR signal saved to {ir_signal_file}")
-        print(f"💾 IR signal saved to {ir_signal_file}")
+        logger.info(f"IR signal saved to /tmp/j5_learned_ir_signal.json")
+        print(f"💾 IR signal saved to /tmp/j5_learned_ir_signal.json")
         return True
     except Exception as e:
         logger.error(f"Failed to save IR signal: {e}")
@@ -236,12 +228,12 @@ def load_learned_ir_signal():
     """Load learned IR signal from persistent storage"""
     global learned_ir_signal
     try:
-        if os.path.exists(ir_signal_file):
-            with open(ir_signal_file, 'r') as f:
+        if os.path.exists('/tmp/j5_learned_ir_signal.json'):
+            with open('/tmp/j5_learned_ir_signal.json', 'r') as f:
                 ir_data = json.load(f)
             learned_ir_signal = ir_data.get('learned_signal')
-            logger.info(f"IR signal loaded from {ir_signal_file}: {learned_ir_signal}")
-            print(f"📂 IR signal loaded from {ir_signal_file}")
+            logger.info(f"IR signal loaded from /tmp/j5_learned_ir_signal.json: {learned_ir_signal}")
+            print(f"📂 IR signal loaded from /tmp/j5_learned_ir_signal.json")
             return True
         else:
             logger.info("No saved IR signal found")
@@ -1452,17 +1444,11 @@ def input_monitor():
     # Set up IR receiver callback
     if ir_receiver is not None:
         def ir_signal_received():
-            global door_states, last_ir_time, ir_learning_mode, ir_learning_start_time, learned_ir_signal, ir_signal_pattern, ir_pulse_times, ir_last_pulse_time
+            global door_states, last_ir_time, ir_learning_mode, ir_learning_start_time, learned_ir_signal
             current_time = time.time()
             
-            # Track pulse timing for pattern recognition
-            if ir_last_pulse_time > 0:
-                pulse_interval = current_time - ir_last_pulse_time
-                ir_pulse_times.append(round(pulse_interval, 3))  # Round to 1ms precision
-            else:
-                ir_pulse_times = []  # Reset for new pattern
-            
-            ir_last_pulse_time = current_time
+            print(f"🔴 IR signal received at {current_time}")
+            logger.info(f"IR signal received at {current_time}")
             
             # Check if we're in learning mode
             if ir_learning_mode:
@@ -1473,270 +1459,64 @@ def input_monitor():
                     print("🔴 IR learning mode timed out")
                     return
                 
-                # Continue capturing pattern - wait for pattern timeout to complete
-                logger.debug(f"Learning mode: captured {len(ir_pulse_times)} intervals")
-                print(f"📡 Learning: {len(ir_pulse_times)} pulses captured...")
+                # Learn this signal
+                learned_ir_signal = current_time
+                ir_learning_mode = False
                 
-                # Set a timer to complete learning after pattern timeout
-                def complete_learning():
-                    global ir_learning_mode, learned_ir_signal, ir_signal_pattern
-                    time.sleep(ir_pattern_timeout)
-                    if ir_learning_mode and len(ir_pulse_times) > 2:  # Need at least 3 pulses for pattern
-                        ir_signal_pattern = ir_pulse_times.copy()
-                        learned_ir_signal = current_time
-                        ir_learning_mode = False
-                        
-                        logger.info(f"IR pattern learned: {ir_signal_pattern}")
-                        print(f"✅ IR pattern learned with {len(ir_signal_pattern)} intervals!")
-                        
-                        # Save the learned signal
-                        if save_learned_ir_signal(learned_ir_signal):
-                            print(f"💾 IR signal saved and will persist across restarts")
-                        else:
-                            print(f"⚠️ IR signal learned but failed to save to file")
+                logger.info(f"IR signal learned successfully at {current_time}")
+                print(f"✅ IR signal learned successfully! Signal will now control console door.")
                 
-                # Start completion timer in background
-                completion_thread = Thread(target=complete_learning, daemon=True)
-                completion_thread.start()
+                # Save the learned signal
+                if save_learned_ir_signal(learned_ir_signal):
+                    print(f"💾 IR signal saved and will persist across restarts")
+                else:
+                    print(f"⚠️ IR signal learned but failed to save to file")
                 return
             
-            # Normal operation mode - check for pattern match
-            # Wait for pattern timeout to complete current signal
-            if len(ir_pulse_times) >= len(ir_signal_pattern) and len(ir_signal_pattern) > 0:
-                # Compare patterns
-                if compare_ir_patterns(ir_signal_pattern, ir_pulse_times[:len(ir_signal_pattern)], ir_pattern_tolerance):
-                    # Debouncing check
-                    if current_time - last_ir_time < ir_debounce_delay:
-                        logger.debug(f"IR signal ignored - debounce active")
-                        print(f"🔴 IR signal ignored - debounce active")
-                        return
-                    
-                    logger.info("IR pattern matches learned signal - executing door operation")
-                    print("✅ IR pattern matches - executing door operation")
-                    
-                    last_ir_time = current_time
-                    current_state = door_states['console_door']
-                    
-                    def ir_door_operation():
-                        """Execute door operation in separate thread"""
-                        try:
-                            if current_state == 'closed':
-                                logger.info("IR thread: Opening console door")
-                                print("🔓 IR thread: Opening console door")
-                                result = open_console_door()
-                                if result:
-                                    print("✅ Console door opened via IR")
-                                else:
-                                    print("❌ Failed to open console door via IR")
-                            else:
-                                logger.info("IR thread: Closing console door")
-                                print("🔒 IR thread: Closing console door")
-                                result = close_console_door()
-                                if result:
-                                    print("✅ Console door closed via IR")
-                                else:
-                                    print("❌ Failed to close console door via IR")
-                        except Exception as e:
-                            logger.error(f"Error in IR door operation: {e}")
-                            print(f"❌ Error in IR door operation: {e}")
-                    
-                    # Execute door operation in separate thread
-                    ir_thread = Thread(target=ir_door_operation, daemon=True)
-                    ir_thread.start()
-                    
-                    # Reset pattern capture
-                    ir_pulse_times = []
-                else:
-                    logger.debug("IR pattern does not match - ignoring")
-                    print("🔴 IR pattern mismatch - ignoring signal")
-            elif not ir_signal_pattern:
+            # Normal operation mode - check if we have a learned signal
+            if learned_ir_signal is None:
                 logger.debug("No learned IR signal - ignoring")
                 print("🔴 No learned IR signal - ignoring")
-
-
-            # Attach the callback to the IR receiver
-            ir_receiver.when_pressed = ir_signal_received
-            logger.info("IR receiver callback attached")
-            print("🔴 IR receiver callback attached - ready to receive signals")
-    
-    # Set up red toggle switch callbacks
-    if red_toggle_switch is not None:
-        def red_toggle_pressed():
-            global last_toggle_time
-            current_time = time.time()
-            
-            # Debouncing: ignore rapid toggle events
-            if current_time - last_toggle_time < toggle_debounce_delay:
-                logger.debug(f"Red toggle PRESSED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
-                print(f"🔴 Red toggle PRESSED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
                 return
             
-            last_toggle_time = current_time
-            logger.info("Red toggle switch pressed (activated)")
-            print("🔴 Red toggle switch PRESSED - starting sequence")
-            try:
-                # Run the sequence in a separate thread to avoid blocking
-                toggle_thread = Thread(target=red_toggle_sequence, daemon=True)
-                toggle_thread.start()
-            except Exception as e:
-                logger.error(f"Error starting red toggle sequence: {e}")
-                print(f"❌ Error starting red toggle sequence: {e}")
-        
-        def red_toggle_released():
-            global last_toggle_time
-            current_time = time.time()
-            
-            # Debouncing: ignore rapid toggle events
-            if current_time - last_toggle_time < toggle_debounce_delay:
-                logger.debug(f"Red toggle RELEASED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
-                print(f"🔴 Red toggle RELEASED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
+            # Debouncing check
+            if current_time - last_ir_time < ir_debounce_delay:
+                logger.debug(f"IR signal ignored - debounce active")
+                print(f"🔴 IR signal ignored - debounce active")
                 return
             
-            last_toggle_time = current_time
-            logger.info("Red toggle switch released (deactivated)")
-            print("🔴 Red toggle switch RELEASED - starting shutdown sequence")
-            try:
-                # Run the shutdown sequence in a separate thread to avoid blocking
-                shutdown_thread = Thread(target=red_toggle_off, daemon=True)
-                shutdown_thread.start()
-            except Exception as e:
-                logger.error(f"Error starting red toggle shutdown sequence: {e}")
-                print(f"❌ Error starting red toggle shutdown sequence: {e}")
-        
-        # Attach the callbacks to the red toggle switch
-        red_toggle_switch.when_pressed = red_toggle_pressed
-        red_toggle_switch.when_released = red_toggle_released
-        logger.info("Red toggle switch callbacks attached")
-        print("🔴 Red toggle switch callbacks attached - ready for activation")
-    
-    try:
-        while True:
-            try:
-                # GPIO 26 (button) is disabled, GPIO 18 (IR receiver) is active
-                # IR receiver uses callback, so we just need to keep the thread alive
-                # button is set to None, ir_receiver handles signals via callback
-                pass
-            except Exception as e:
-                logger.error(f"Error in input monitoring: {e}")
-                print(f"Error in input monitoring: {e}")
+            # Execute door operation
+            last_ir_time = current_time
+            current_state = door_states['console_door']
             
-            time.sleep(0.1)  # Check every 100ms
-    except KeyboardInterrupt:
-        logger.info("Input monitoring stopped")
-        print("Input monitoring stopped")
-    except Exception as e:
-        logger.error(f"Input monitor thread error: {e}")
-        print(f"Input monitor thread error: {e}")
-
-# GPIO cleanup function
-def cleanup_gpio():
-    """Clean up GPIO resources"""
-    logger.info("Starting GPIO cleanup...")
-    print("Starting GPIO cleanup...")
-    
-    try:
-        # Stop all threads
-        blink_stop_event.set()
-        malfunction_stop_event.set()
-        stop_orange_flash()  # Stop orange lamp flashing
-        
-        # Close all GPIO devices
-        devices_to_close = [
-            orange_lamp, red_lamp, left_door, console_door, right_door,
-            startup_led, malfunction_led1, other2, ir_receiver, red_toggle_switch
-        ]
-        
-        for device in devices_to_close:
-            if device and hasattr(device, 'close'):
+            logger.info("IR signal matches learned signal - executing door operation")
+            print("✅ IR signal matches - executing door operation")
+            
+            def ir_door_operation():
+                """Execute door operation in separate thread"""
                 try:
-                    device.close()
-                    logger.debug(f"Closed device: {device}")
+                    if current_state == 'closed':
+                        logger.info("IR thread: Opening console door")
+                        print("🔓 IR thread: Opening console door")
+                        result = open_console_door()
+                        if result:
+                            print("✅ Console door opened via IR")
+                        else:
+                            print("❌ Failed to open console door via IR")
+                    else:
+                        logger.info("IR thread: Closing console door")
+                        print("🔒 IR thread: Closing console door")
+                        result = close_console_door()
+                        if result:
+                            print("✅ Console door closed via IR")
+                        else:
+                            print("❌ Failed to close console door via IR")
                 except Exception as e:
-                    logger.warning(f"Error closing device {device}: {e}")
-        
-        logger.info("GPIO cleanup completed")
-        print("GPIO cleanup completed")
-    except Exception as e:
-        logger.error(f"Error during GPIO cleanup: {e}")
-        print(f"Error during GPIO cleanup: {e}")
+                    logger.error(f"Error in IR door operation: {e}")
+                    print(f"❌ Error in IR door operation: {e}")
+            
+            # Execute door operation in separate thread
+            ir_thread = Thread(target=ir_door_operation, daemon=True)
+            ir_thread.start()
 
-# Signal handler for graceful shutdown
-def signal_handler(signum, frame):
-    """Handle shutdown signals"""
-    logger.info(f"Received signal {signum}, shutting down gracefully...")
-    print(f"\nReceived signal {signum}, shutting down gracefully...")
-    cleanup_gpio()
-    sys.exit(0)
-
-# Register signal handlers
-signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
-signal.signal(signal.SIGTERM, signal_handler)  # systemctl stop
-
-def capture_ir_pattern():
-    """Capture IR signal timing pattern for recognition"""
-    global ir_signal_times, ir_signal_pattern
-    
-    # Start pattern capture
-    ir_signal_times = []
-    start_time = time.time()
-    
-    def pattern_capture_callback():
-        current_time = time.time()
-        ir_signal_times.append(current_time - start_time)
-    
-    # Set up temporary callback for pattern capture
-    original_callback = ir_receiver.when_pressed
-    ir_receiver.when_pressed = pattern_capture_callback
-    
-    # Wait for pattern capture window
-    time.sleep(ir_pattern_capture_window)
-    
-    # Restore original callback
-    ir_receiver.when_pressed = original_callback
-    
-    # Process captured pattern
-    if len(ir_signal_times) > 1:
-        # Calculate intervals between pulses
-        ir_signal_pattern = []
-        for i in range(1, len(ir_signal_times)):
-            interval = ir_signal_times[i] - ir_signal_times[i-1]
-            ir_signal_pattern.append(round(interval, 3))  # Round to 1ms precision
-        
-        logger.info(f"IR pattern captured: {ir_signal_pattern}")
-        print(f"📡 IR pattern captured: {len(ir_signal_pattern)} intervals")
-        return True
-    else:
-        logger.warning("No IR pattern captured")
-        print("⚠️ No IR pattern captured")
-        return False
-
-def compare_ir_patterns(pattern1, pattern2, tolerance=0.1):
-    """Compare two IR patterns with tolerance"""
-    if len(pattern1) != len(pattern2):
-        return False
-    
-    for i in range(len(pattern1)):
-        if abs(pattern1[i] - pattern2[i]) > tolerance:
-            return False
-    
-    return True
-
-if __name__ == '__main__':
-    try:
-        # Start input monitor in a thread
-        input_thread = Thread(target=input_monitor)
-        input_thread.daemon = True
-        input_thread.start()
-        
-        # Start Flask app
-        print("Starting J5 Console API on port 5000...")
-        # Disable debug mode to prevent Flask restarts that cause GPIO conflicts
-        app.run(host='0.0.0.0', port=5000, debug=False)
-    except Exception as e:
-        logger.error(f"Error starting application: {e}")
-        print(f"Error starting application: {e}")
-        cleanup_gpio()
-        sys.exit(1)
-    finally:
-        # Ensure cleanup happens even on normal exit
-        cleanup_gpio()
+{{ ... }}
