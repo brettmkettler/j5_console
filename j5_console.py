@@ -839,11 +839,12 @@ class IRLearn(Resource):
     @ns_ir.marshal_with(ir_learn_model)
     def get(self):
         '''Get current IR learning status'''
+        global ir_learning_mode, ir_learning_start_time
+        
         if ir_learning_mode:
             remaining_time = max(0, int(ir_learning_timeout - (time.time() - ir_learning_start_time)))
             if remaining_time <= 0:
                 # Learning has timed out
-                global ir_learning_mode
                 ir_learning_mode = False
                 return {
                     'status': 'timeout',
