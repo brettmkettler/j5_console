@@ -25,13 +25,19 @@
 
 If you prefer to set it up manually:
 
-1. **Copy the service file:**
+1. **Set Permissions:**
+   ```bash
+   sudo raspi-config nonint get_config_var dtparam /boot/firmware/config.txt
+   sudo usermod -a -G gpio $USER
+   ```
+
+2. **Copy the service file:**
    ```bash
    sudo cp j5-console.service /etc/systemd/system/
    sudo chmod 644 /etc/systemd/system/j5-console.service
    ```
 
-2. **Enable and start the service:**
+3. **Enable and start the service:**
    ```bash
    sudo systemctl daemon-reload
    sudo systemctl enable j5-console.service

@@ -7,9 +7,9 @@ Wants=network.target
 Type=simple
 User=seanfuchs
 Group=seanfuchs
-WorkingDirectory=/home/seanfuchs/Desktop
+WorkingDirectory=/home/seanfuchs/Desktop/j5_console
 Environment=PATH=/home/seanfuchs/Desktop/venv/bin
-ExecStart=/home/seanfuchs/Desktop/venv/bin/python /home/seanfuchs/Desktop/j5_console.py
+ExecStart=/home/seanfuchs/Desktop/venv/bin/python /home/seanfuchs/Desktop/j5_console/j5_console.py
 Restart=always
 RestartSec=10
 StandardOutput=journal

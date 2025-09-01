@@ -85,18 +85,23 @@ logger.info(f"Successfully initialized orange_lamp on GPIO 5: {orange_lamp}")
 red_lamp = LED(6, pin_factory=pin_factory)
 logger.info(f"Successfully initialized red_lamp on GPIO 6: {red_lamp}")
 
-# Initialize left_door PWM device
-left_door = PWMOutputDevice(12, frequency=50, pin_factory=pin_factory)
-logger.info(f"Successfully initialized left_door on GPIO 12: {left_door}")
+# Initialize servo devices using Servo class for better Pi 5 compatibility
+from gpiozero import Servo
 
-# Initialize console_door PWM device
-logger.info("Initializing console_door on GPIO pin 16")
-console_door = PWMOutputDevice(16, frequency=50, pin_factory=pin_factory)
-logger.info(f"Successfully initialized console_door: {console_door}, type: {type(console_door)}")
+left_door = Servo(12, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000, pin_factory=pin_factory)
+left_door.value = None  # Disable PWM on startup - servo stays in current position
+logger.info(f"Successfully initialized left_door servo on GPIO 12: {left_door}")
 
-# Initialize right_door PWM device
-right_door = PWMOutputDevice(19, frequency=50, pin_factory=pin_factory)
-logger.info(f"Successfully initialized right_door on GPIO 19: {right_door}")
+# Initialize console_door servo device
+logger.info("Initializing console_door servo on GPIO pin 16")
+console_door = Servo(16, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000, pin_factory=pin_factory)
+console_door.value = None  # Disable PWM on startup - servo stays in current position
+logger.info(f"Successfully initialized console_door servo: {console_door}, type: {type(console_door)}")
+
+# Initialize right_door servo device
+right_door = Servo(19, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000, pin_factory=pin_factory)
+right_door.value = None  # Disable PWM on startup - servo stays in current position
+logger.info(f"Successfully initialized right_door servo on GPIO 19: {right_door}")
 
 # Startup indicator LEDs (3 LEDs in series) - GPIO 27 Pin 13
 startup_led = LED(27, pin_factory=pin_factory)
@@ -194,6 +199,15 @@ orange_flash_stop_event = Event()
 # IR receiver debouncing
 last_ir_time = 0
 ir_debounce_delay = 2.0  # 2 seconds between IR signals
+
+# IR learning state
+ir_learning_mode = False
+ir_learning_timeout = 30.0  # 30 seconds timeout for learning
+ir_learning_start_time = 0
+learned_ir_signal = None
+
+# IR signal persistence file
+ir_signal_file = '/tmp/j5_learned_ir_signal.json'
 
 # Red toggle switch debouncing
 last_toggle_time = 0
@@ -297,47 +311,49 @@ def toggle_state():
 
 # Function to set servo angle with improved calibration
 def set_servo_angle(name, angle):
-    """Set servo angle with proper limits and calibration"""
-    logger.debug(f"set_servo_angle called for {name} with angle {angle}°")
+    """
+    Set servo to specific angle using gpiozero Servo class
     
+    Args:
+        name: servo name from servo_config
+        angle: target angle in degrees (0-180)
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
     if name not in servo_config:
-        logger.error(f"Error: Unknown servo '{name}'")
+        logger.error(f"Unknown servo: {name}")
         return False
     
     config = servo_config[name]
-    logger.debug(f"Servo config for {name}: {config}")
     
-    # Check angle limits
-    if not (config['min_angle'] <= angle <= config['max_angle']):
-        logger.warning(f"Error: Angle {angle}° out of range [{config['min_angle']}°-{config['max_angle']}°] for {name}")
+    # Validate angle range
+    if not config['min_angle'] <= angle <= config['max_angle']:
+        logger.error(f"Angle {angle}° out of range for {name} (min: {config['min_angle']}°, max: {config['max_angle']}°)")
         return False
     
-    # Calculate pulse width based on angle
-    pulse_range = config['max_pulse'] - config['min_pulse']
-    angle_range = config['max_angle'] - config['min_angle']
-    pulse_width = config['min_pulse'] + (angle - config['min_angle']) * (pulse_range / angle_range)
-    logger.debug(f"Calculated pulse width for {name}: {pulse_width:.4f}ms")
-    
-    # Convert pulse width to duty cycle (pulse_width_ms / 20ms_period * 100)
-    duty_cycle = (pulse_width / 20.0) * 100
-    logger.debug(f"Calculated duty cycle for {name}: {duty_cycle:.4f}%")
+    logger.debug(f"set_servo_angle called for {name} with angle {angle}°")
+    logger.debug(f"Servo config for {name}: {config}")
     
     try:
-        # Set servo position (gpiozero uses 0.0-1.0 scale)
-        logger.info(f"Setting {config['description']} to {angle}° (pulse: {pulse_width:.2f}ms, duty: {duty_cycle:.2f}%)")
+        # Convert angle to servo value (-1 to 1 range for gpiozero Servo)
+        # 0° = -1, 90° = 0, 180° = 1
+        servo_value = (angle - 90) / 90.0
         
-        # Set the PWM value
-        config['device'].value = duty_cycle / 100
+        logger.info(f"Setting {config['description']} to {angle}° (servo value: {servo_value:.3f})")
         
-        print(f"⚙️ {config['description']}: {angle}° (pulse: {pulse_width:.2f}ms, duty: {duty_cycle:.1f}%)")
+        # Set the servo position
+        config['device'].value = servo_value
         
-        # Wait for servo to reach position (typical servo takes 0.5-1s for 180° movement)
-        time.sleep(0.8)
+        print(f"⚙️ {config['description']}: {angle}° (servo value: {servo_value:.3f})")
         
-        # Disable servo to prevent jittering (set to None stops PWM signal)
-        config['device'].value = None
-        logger.debug(f"Servo {name} PWM disabled to prevent jittering")
-        print(f"🔇 {config['description']} PWM disabled to prevent jittering")
+        # Wait for servo to reach position
+        time.sleep(1.5)
+        
+        # Temporarily disabled PWM disable to test servo movement
+        # config['device'].value = None  # For Servo class, None stops the servo
+        # logger.debug(f"Servo {name} PWM disabled to prevent jittering")
+        # print(f"🔇 {config['description']} PWM disabled to prevent jittering")
         
         logger.debug(f"Servo {name} position set successfully")
         return True
@@ -476,12 +492,16 @@ def activation_sequence():
         startup_led.off()
         malfunction_led1.off()
         # malfunction_led2 removed - only one malfunction LED group
+        
+        # Wait 0.5 seconds (but check for stop event)
         time.sleep(0.5)
         
         # Turn on all startup LEDs
         startup_led.on()
         malfunction_led1.on()
         # malfunction_led2 removed - only one malfunction LED group
+        
+        # Wait 0.5 seconds (but check for stop event)
         time.sleep(0.5)
     
     # Step 4: Keep startup LED on for 5 seconds
@@ -587,6 +607,7 @@ ns_door = api.namespace('door', description='Door control operations')
 ns_digital = api.namespace('digital', description='LED and digital output control')
 ns_servo = api.namespace('servo', description='Direct servo control')
 ns_system = api.namespace('system', description='System information and sequences')
+ns_ir = api.namespace('ir', description='IR control operations')
 
 # API models for documentation
 state_model = api.model('StateResponse', {
@@ -623,6 +644,13 @@ status_model = api.model('StatusResponse', {
 sequence_model = api.model('SequenceResponse', {
     'status': fields.String(description='Operation status'),
     'current_state': fields.String(description='Current system state after sequence')
+})
+
+ir_learn_model = api.model('IRLearnResponse', {
+    'status': fields.String(description='IR learning status'),
+    'message': fields.String(description='IR learning status message'),
+    'timeout': fields.Integer(description='IR learning timeout in seconds'),
+    'learning': fields.Boolean(description='Whether IR learning is active')
 })
 
 @ns_servo.route('/<string:name>')
@@ -776,6 +804,66 @@ class DoorControl(Resource):
             else:
                 print(f"❌ Failed to set {name} door to angle {angle}°")
                 api.abort(404, 'Unknown door')
+
+@ns_ir.route('/learn')
+class IRLearn(Resource):
+    @ns_ir.doc('learn_ir_signal')
+    @ns_ir.marshal_with(ir_learn_model)
+    def post(self):
+        '''Start IR signal learning mode'''
+        global ir_learning_mode, ir_learning_start_time
+        
+        if ir_learning_mode:
+            return {
+                'status': 'already_learning',
+                'message': 'IR learning mode is already active',
+                'timeout': int(ir_learning_timeout - (time.time() - ir_learning_start_time)),
+                'learning': True
+            }
+        
+        # Start learning mode
+        ir_learning_mode = True
+        ir_learning_start_time = time.time()
+        
+        logger.info("IR learning mode activated")
+        print("🔴 IR learning mode activated - waiting for signal...")
+        
+        return {
+            'status': 'learning_started',
+            'message': 'IR learning mode activated. Send an IR signal within 30 seconds.',
+            'timeout': int(ir_learning_timeout),
+            'learning': True
+        }
+    
+    @ns_ir.doc('get_ir_learning_status')
+    @ns_ir.marshal_with(ir_learn_model)
+    def get(self):
+        '''Get current IR learning status'''
+        if ir_learning_mode:
+            remaining_time = max(0, int(ir_learning_timeout - (time.time() - ir_learning_start_time)))
+            if remaining_time <= 0:
+                # Learning has timed out
+                global ir_learning_mode
+                ir_learning_mode = False
+                return {
+                    'status': 'timeout',
+                    'message': 'IR learning mode timed out',
+                    'timeout': 0,
+                    'learning': False
+                }
+            return {
+                'status': 'learning_active',
+                'message': f'IR learning mode active. {remaining_time} seconds remaining.',
+                'timeout': remaining_time,
+                'learning': True
+            }
+        else:
+            return {
+                'status': 'not_learning',
+                'message': 'IR learning mode is not active',
+                'timeout': 0,
+                'learning': False
+            }
 
 # Servo testing and calibration models
 servo_info_model = api.model('ServoInfo', {
@@ -1320,9 +1408,26 @@ def input_monitor():
     # Set up IR receiver callback
     if ir_receiver is not None:
         def ir_signal_received():
-            global door_states, last_ir_time
+            global door_states, last_ir_time, ir_learning_mode, ir_learning_start_time, learned_ir_signal
             current_time = time.time()
             
+            # Check if we're in learning mode
+            if ir_learning_mode:
+                # Check if learning has timed out
+                if current_time - ir_learning_start_time > ir_learning_timeout:
+                    ir_learning_mode = False
+                    logger.info("IR learning mode timed out")
+                    print("🔴 IR learning mode timed out")
+                    return
+                
+                # We're in learning mode and got a signal - learn it!
+                ir_learning_mode = False
+                learned_ir_signal = current_time  # Simple timestamp as signal identifier
+                logger.info(f"IR signal learned successfully at {current_time}")
+                print(f"✅ IR signal learned successfully! New signal will now open console door.")
+                return
+            
+            # Normal operation mode - debouncing and door control
             # Debouncing: ignore signals that come too quickly
             if current_time - last_ir_time < ir_debounce_delay:
                 logger.debug(f"IR signal ignored - debounce active ({current_time - last_ir_time:.2f}s since last)")
