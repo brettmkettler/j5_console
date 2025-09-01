@@ -1464,6 +1464,12 @@ def input_monitor():
                 learned_ir_signal = current_time  # Simple timestamp as signal identifier
                 logger.info(f"IR signal learned successfully at {current_time}")
                 print(f"✅ IR signal learned successfully! New signal will now open console door.")
+                
+                # Save the learned signal to persistent storage
+                if save_learned_ir_signal(learned_ir_signal):
+                    print(f"💾 IR signal saved and will persist across restarts")
+                else:
+                    print(f"⚠️ IR signal learned but failed to save to file")
                 return
             
             # Normal operation mode - debouncing and door control
