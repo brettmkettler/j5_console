@@ -503,7 +503,7 @@ def activation_sequence():
     print("Step 1: Lighting up startup LEDs")
     startup_led.on()
     malfunction_led1.on()
-    # malfunction_led2 removed - only one malfunction LED group
+    # malfunction_led2 removed - only one malfunction LED group in diagram
     time.sleep(1)  # Keep them on for a moment
     
     # Step 2: Blink the red and orange lamps back and forth
@@ -526,7 +526,7 @@ def activation_sequence():
         # Turn off all startup LEDs
         startup_led.off()
         malfunction_led1.off()
-        # malfunction_led2 removed - only one malfunction LED group
+        # malfunction_led2 removed - only one malfunction LED group in diagram
         
         # Wait 0.5 seconds (but check for stop event)
         time.sleep(0.5)
@@ -534,7 +534,7 @@ def activation_sequence():
         # Turn on all startup LEDs
         startup_led.on()
         malfunction_led1.on()
-        # malfunction_led2 removed - only one malfunction LED group
+        # malfunction_led2 removed - only one malfunction LED group in diagram
         
         # Wait 0.5 seconds (but check for stop event)
         time.sleep(0.5)
@@ -543,7 +543,7 @@ def activation_sequence():
     print("Step 4: Keeping startup LED on for 5 seconds")
     # Turn off malfunction LEDs, keep only startup LED
     malfunction_led1.off()
-    # malfunction_led2 removed - only one malfunction LED group
+    # malfunction_led2 removed - only one malfunction LED group in diagram
     startup_led.on()
     time.sleep(5)
     
@@ -572,13 +572,13 @@ def deactivation_sequence():
         # Turn on startup and malfunction LEDs
         startup_led.on()
         malfunction_led1.on()
-        # malfunction_led2 removed - only one malfunction LED group
+        # malfunction_led2 removed - only one malfunction LED group in diagram
         time.sleep(0.3)
         
         # Turn off startup and malfunction LEDs
         startup_led.off()
         malfunction_led1.off()
-        # malfunction_led2 removed - only one malfunction LED group
+        # malfunction_led2 removed - only one malfunction LED group in diagram
         time.sleep(0.3)
     
     # Step 2: Light both red and orange lamps and both startup and malfunction LEDs on for 5 seconds
@@ -587,7 +587,7 @@ def deactivation_sequence():
     orange_lamp.on()
     startup_led.on()
     malfunction_led1.on()
-    # malfunction_led2 removed - only one malfunction LED group
+    # malfunction_led2 removed - only one malfunction LED group in diagram
     time.sleep(5)
     
     # Step 3: Turn them off in order every 2 seconds: startup LED, malfunction LEDs, red lamp, orange lamp
@@ -599,7 +599,7 @@ def deactivation_sequence():
     
     # Turn off malfunction LEDs
     malfunction_led1.off()
-    # malfunction_led2 removed - only one malfunction LED group
+    # malfunction_led2 removed - only one malfunction LED group in diagram
     time.sleep(2)
     
     # Turn off red lamp
@@ -1284,6 +1284,179 @@ def ir_door_operation():
         logger.error(f"Error in IR door operation: {e}")
         print(f"❌ Error in IR door operation: {e}")
 
+# Functions to control console door
+def open_console_door():
+    global door_states
+    logger.info("Opening console door")
+    print("\n🔓 Opening console door...")
+    
+    # Use the configured open angle from servo_config
+    open_angle = servo_config['console_door']['open_angle']
+    logger.debug(f"Console door open angle from config: {open_angle}°")
+    print(f"📍 Setting console_door to open position: {open_angle}°")
+    
+    success = set_servo_angle('console_door', open_angle)
+    if success:
+        door_states['console_door'] = 'open'
+        logger.info(f"Console door opened successfully. State set to: {door_states['console_door']}")
+        print(f"✅ Door opened successfully - Current state: {door_states['console_door']}\n")
+    else:
+        logger.error("Failed to open console door")
+        print(f"❌ Failed to open door\n")
+    
+    return success
+
+def close_console_door():
+    global door_states
+    logger.info("Closing console door")
+    print("\n🔒 Closing console door...")
+    
+    # Use the configured closed angle from servo_config
+    closed_angle = servo_config['console_door']['closed_angle']
+    logger.debug(f"Console door closed angle from config: {closed_angle}°")
+    print(f"📍 Setting console_door to closed position: {closed_angle}°")
+    
+    success = set_servo_angle('console_door', closed_angle)
+    if success:
+        door_states['console_door'] = 'closed'
+        logger.info(f"Console door closed successfully. State set to: {door_states['console_door']}")
+        print(f"✅ Door closed successfully - Current state: {door_states['console_door']}\n")
+    else:
+        logger.error("Failed to close console door")
+        print(f"❌ Failed to close door\n")
+    
+    return success
+
+def toggle_console_door():
+    global door_states
+    logger.info(f"Toggling console door. Current state: {door_states['console_door']}")
+    print(f"\n🔄 Toggling console door - Current state: {door_states['console_door']}")
+    
+    if door_states['console_door'] == 'closed':
+        logger.debug("Door is closed, opening it")
+        print("Door is closed, opening it...")
+        return open_console_door()
+    else:
+        logger.debug("Door is open, closing it")
+        print("Door is open, closing it...")
+        return close_console_door()
+
+# Functions to control battery doors (left and right simultaneously)
+def open_battery_doors():
+    global door_states
+    logger.info("Opening battery doors (right first, then left)")
+    print("\n🔋 Opening battery doors...")
+    
+    # Get configured open angles for both doors
+    left_open_angle = servo_config['left_door']['open_angle']
+    right_open_angle = servo_config['right_door']['open_angle']
+    
+    logger.debug(f"Left door open angle: {left_open_angle}°, Right door open angle: {right_open_angle}°")
+    print(f"📍 Opening right door first to {right_open_angle}°, then left door to {left_open_angle}°")
+    
+    # Open right door first
+    print("🔓 Opening right door first...")
+    right_success = set_servo_angle('right_door', right_open_angle)
+    
+    # Small delay before opening left door
+    time.sleep(0.1)
+    
+    # Then open left door
+    print("🔓 Opening left door...")
+    left_success = set_servo_angle('left_door', left_open_angle)
+    
+    # Update door states
+    if left_success:
+        door_states['left_door'] = 'open'
+        logger.info("Left battery door opened successfully")
+        print("✅ Left battery door opened successfully")
+    else:
+        logger.error("Failed to open left battery door")
+        print("❌ Failed to open left battery door")
+    
+    if right_success:
+        door_states['right_door'] = 'open'
+        logger.info("Right battery door opened successfully")
+        print("✅ Right battery door opened successfully")
+    else:
+        logger.error("Failed to open right battery door")
+        print("❌ Failed to open right battery door")
+    
+    overall_success = left_success and right_success
+    if overall_success:
+        logger.info("Both battery doors opened successfully")
+        print("✅ Both battery doors opened successfully\n")
+    else:
+        logger.warning("One or both battery doors failed to open")
+        print("⚠️ One or both battery doors failed to open\n")
+    
+    return overall_success
+
+def close_battery_doors():
+    global door_states
+    logger.info("Closing battery doors (left first, then right)")
+    print("\n🔋 Closing battery doors...")
+    
+    # Get configured closed angles for both doors
+    left_closed_angle = servo_config['left_door']['closed_angle']
+    right_closed_angle = servo_config['right_door']['closed_angle']
+    
+    logger.debug(f"Left door closed angle: {left_closed_angle}°, Right door closed angle: {right_closed_angle}°")
+    print(f"📍 Closing left door first to {left_closed_angle}°, then right door to {right_closed_angle}°")
+    
+    # Close left door first
+    print("🔒 Closing left door first...")
+    left_success = set_servo_angle('left_door', left_closed_angle)
+    
+    # Small delay before closing right door
+    time.sleep(0.1)
+    
+    # Then close right door
+    print("🔒 Closing right door...")
+    right_success = set_servo_angle('right_door', right_closed_angle)
+    
+    # Update door states
+    if left_success:
+        door_states['left_door'] = 'closed'
+        logger.info("Left battery door closed successfully")
+        print("✅ Left battery door closed successfully")
+    else:
+        logger.error("Failed to close left battery door")
+        print("❌ Failed to close left battery door")
+    
+    if right_success:
+        door_states['right_door'] = 'closed'
+        logger.info("Right battery door closed successfully")
+        print("✅ Right battery door closed successfully")
+    else:
+        logger.error("Failed to close right battery door")
+        print("❌ Failed to close right battery door")
+    
+    overall_success = left_success and right_success
+    if overall_success:
+        logger.info("Both battery doors closed successfully")
+        print("✅ Both battery doors closed successfully\n")
+    else:
+        logger.warning("One or both battery doors failed to close")
+        print("⚠️ One or both battery doors failed to close\n")
+    
+    return overall_success
+
+def toggle_battery_doors():
+    global door_states
+    logger.info(f"Toggling battery doors. Left: {door_states['left_door']}, Right: {door_states['right_door']}")
+    print(f"\n🔄 Toggling battery doors - Left: {door_states['left_door']}, Right: {door_states['right_door']}")
+    
+    # If either door is closed, open both. If both are open, close both.
+    if door_states['left_door'] == 'closed' or door_states['right_door'] == 'closed':
+        logger.debug("One or both doors are closed, opening both")
+        print("One or both doors are closed, opening both...")
+        return open_battery_doors()
+    else:
+        logger.debug("Both doors are open, closing both")
+        print("Both doors are open, closing both...")
+        return close_battery_doors()
+
 # Button and IR receiver monitoring thread
 def input_monitor():
     logger.info("Input monitoring started (GPIO 26 red toggle switch, GPIO 18 IR receiver enabled)")
@@ -1474,176 +1647,3 @@ if __name__ == '__main__':
     finally:
         # Ensure cleanup happens even on normal exit
         cleanup_gpio()
-
-# Functions to control console door
-def open_console_door():
-    global door_states
-    logger.info("Opening console door")
-    print("\n🔓 Opening console door...")
-    
-    # Use the configured open angle from servo_config
-    open_angle = servo_config['console_door']['open_angle']
-    logger.debug(f"Console door open angle from config: {open_angle}°")
-    print(f"📍 Setting console_door to open position: {open_angle}°")
-    
-    success = set_servo_angle('console_door', open_angle)
-    if success:
-        door_states['console_door'] = 'open'
-        logger.info(f"Console door opened successfully. State set to: {door_states['console_door']}")
-        print(f"✅ Door opened successfully - Current state: {door_states['console_door']}\n")
-    else:
-        logger.error("Failed to open console door")
-        print(f"❌ Failed to open door\n")
-    
-    return success
-
-def close_console_door():
-    global door_states
-    logger.info("Closing console door")
-    print("\n🔒 Closing console door...")
-    
-    # Use the configured closed angle from servo_config
-    closed_angle = servo_config['console_door']['closed_angle']
-    logger.debug(f"Console door closed angle from config: {closed_angle}°")
-    print(f"📍 Setting console_door to closed position: {closed_angle}°")
-    
-    success = set_servo_angle('console_door', closed_angle)
-    if success:
-        door_states['console_door'] = 'closed'
-        logger.info(f"Console door closed successfully. State set to: {door_states['console_door']}")
-        print(f"✅ Door closed successfully - Current state: {door_states['console_door']}\n")
-    else:
-        logger.error("Failed to close console door")
-        print(f"❌ Failed to close door\n")
-    
-    return success
-
-def toggle_console_door():
-    global door_states
-    logger.info(f"Toggling console door. Current state: {door_states['console_door']}")
-    print(f"\n🔄 Toggling console door - Current state: {door_states['console_door']}")
-    
-    if door_states['console_door'] == 'closed':
-        logger.debug("Door is closed, opening it")
-        print("Door is closed, opening it...")
-        return open_console_door()
-    else:
-        logger.debug("Door is open, closing it")
-        print("Door is open, closing it...")
-        return close_console_door()
-
-# Functions to control battery doors (left and right simultaneously)
-def open_battery_doors():
-    global door_states
-    logger.info("Opening battery doors (right first, then left)")
-    print("\n🔋 Opening battery doors...")
-    
-    # Get configured open angles for both doors
-    left_open_angle = servo_config['left_door']['open_angle']
-    right_open_angle = servo_config['right_door']['open_angle']
-    
-    logger.debug(f"Left door open angle: {left_open_angle}°, Right door open angle: {right_open_angle}°")
-    print(f"📍 Opening right door first to {right_open_angle}°, then left door to {left_open_angle}°")
-    
-    # Open right door first
-    print("🔓 Opening right door first...")
-    right_success = set_servo_angle('right_door', right_open_angle)
-    
-    # Small delay before opening left door
-    time.sleep(0.1)
-    
-    # Then open left door
-    print("🔓 Opening left door...")
-    left_success = set_servo_angle('left_door', left_open_angle)
-    
-    # Update door states
-    if left_success:
-        door_states['left_door'] = 'open'
-        logger.info("Left battery door opened successfully")
-        print("✅ Left battery door opened successfully")
-    else:
-        logger.error("Failed to open left battery door")
-        print("❌ Failed to open left battery door")
-    
-    if right_success:
-        door_states['right_door'] = 'open'
-        logger.info("Right battery door opened successfully")
-        print("✅ Right battery door opened successfully")
-    else:
-        logger.error("Failed to open right battery door")
-        print("❌ Failed to open right battery door")
-    
-    overall_success = left_success and right_success
-    if overall_success:
-        logger.info("Both battery doors opened successfully")
-        print("✅ Both battery doors opened successfully\n")
-    else:
-        logger.warning("One or both battery doors failed to open")
-        print("⚠️ One or both battery doors failed to open\n")
-    
-    return overall_success
-
-def close_battery_doors():
-    global door_states
-    logger.info("Closing battery doors (left first, then right)")
-    print("\n🔋 Closing battery doors...")
-    
-    # Get configured closed angles for both doors
-    left_closed_angle = servo_config['left_door']['closed_angle']
-    right_closed_angle = servo_config['right_door']['closed_angle']
-    
-    logger.debug(f"Left door closed angle: {left_closed_angle}°, Right door closed angle: {right_closed_angle}°")
-    print(f"📍 Closing left door first to {left_closed_angle}°, then right door to {right_closed_angle}°")
-    
-    # Close left door first
-    print("🔒 Closing left door first...")
-    left_success = set_servo_angle('left_door', left_closed_angle)
-    
-    # Small delay before closing right door
-    time.sleep(0.1)
-    
-    # Then close right door
-    print("🔒 Closing right door...")
-    right_success = set_servo_angle('right_door', right_closed_angle)
-    
-    # Update door states
-    if left_success:
-        door_states['left_door'] = 'closed'
-        logger.info("Left battery door closed successfully")
-        print("✅ Left battery door closed successfully")
-    else:
-        logger.error("Failed to close left battery door")
-        print("❌ Failed to close left battery door")
-    
-    if right_success:
-        door_states['right_door'] = 'closed'
-        logger.info("Right battery door closed successfully")
-        print("✅ Right battery door closed successfully")
-    else:
-        logger.error("Failed to close right battery door")
-        print("❌ Failed to close right battery door")
-    
-    overall_success = left_success and right_success
-    if overall_success:
-        logger.info("Both battery doors closed successfully")
-        print("✅ Both battery doors closed successfully\n")
-    else:
-        logger.warning("One or both battery doors failed to close")
-        print("⚠️ One or both battery doors failed to close\n")
-    
-    return overall_success
-
-def toggle_battery_doors():
-    global door_states
-    logger.info(f"Toggling battery doors. Left: {door_states['left_door']}, Right: {door_states['right_door']}")
-    print(f"\n🔄 Toggling battery doors - Left: {door_states['left_door']}, Right: {door_states['right_door']}")
-    
-    # If either door is closed, open both. If both are open, close both.
-    if door_states['left_door'] == 'closed' or door_states['right_door'] == 'closed':
-        logger.debug("One or both doors are closed, opening both")
-        print("One or both doors are closed, opening both...")
-        return open_battery_doors()
-    else:
-        logger.debug("Both doors are open, closing both")
-        print("Both doors are open, closing both...")
-        return close_battery_doors()
