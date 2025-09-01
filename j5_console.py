@@ -1518,5 +1518,3 @@ def input_monitor():
             # Execute door operation in separate thread
             ir_thread = Thread(target=ir_door_operation, daemon=True)
             ir_thread.start()
-
-{{ ... }}
