@@ -209,6 +209,44 @@ learned_ir_signal = None
 # IR signal persistence file
 ir_signal_file = '/tmp/j5_learned_ir_signal.json'
 
+def save_learned_ir_signal(signal_data):
+    """Save learned IR signal to persistent storage"""
+    try:
+        ir_data = {
+            'learned_signal': signal_data,
+            'timestamp': time.time(),
+            'version': '1.0'
+        }
+        with open(ir_signal_file, 'w') as f:
+            json.dump(ir_data, f, indent=2)
+        logger.info(f"IR signal saved to {ir_signal_file}")
+        print(f"💾 IR signal saved to {ir_signal_file}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save IR signal: {e}")
+        print(f"❌ Failed to save IR signal: {e}")
+        return False
+
+def load_learned_ir_signal():
+    """Load learned IR signal from persistent storage"""
+    global learned_ir_signal
+    try:
+        if os.path.exists(ir_signal_file):
+            with open(ir_signal_file, 'r') as f:
+                ir_data = json.load(f)
+            learned_ir_signal = ir_data.get('learned_signal')
+            logger.info(f"IR signal loaded from {ir_signal_file}: {learned_ir_signal}")
+            print(f"📂 IR signal loaded from {ir_signal_file}")
+            return True
+        else:
+            logger.info("No saved IR signal found")
+            print("📂 No saved IR signal found")
+            return False
+    except Exception as e:
+        logger.error(f"Failed to load IR signal: {e}")
+        print(f"❌ Failed to load IR signal: {e}")
+        return False
+
 # Red toggle switch debouncing
 last_toggle_time = 0
 toggle_debounce_delay = 1.0  # 1 second between toggle events
