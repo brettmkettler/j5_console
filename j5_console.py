@@ -200,6 +200,15 @@ orange_flash_stop_event = Event()
 last_ir_time = 0
 ir_debounce_delay = 2.0  # 2 seconds between IR signals
 
+# IR learning state
+ir_learning_mode = False
+ir_learning_timeout = 30.0  # 30 seconds timeout for learning
+ir_learning_start_time = 0
+learned_ir_signal = None
+
+# IR signal persistence file
+ir_signal_file = '/tmp/j5_learned_ir_signal.json'
+
 # Red toggle switch debouncing
 last_toggle_time = 0
 toggle_debounce_delay = 1.0  # 1 second between toggle events
@@ -483,12 +492,16 @@ def activation_sequence():
         startup_led.off()
         malfunction_led1.off()
         # malfunction_led2 removed - only one malfunction LED group
+        
+        # Wait 0.5 seconds (but check for stop event)
         time.sleep(0.5)
         
         # Turn on all startup LEDs
         startup_led.on()
         malfunction_led1.on()
         # malfunction_led2 removed - only one malfunction LED group
+        
+        # Wait 0.5 seconds (but check for stop event)
         time.sleep(0.5)
     
     # Step 4: Keep startup LED on for 5 seconds
@@ -594,6 +607,7 @@ ns_door = api.namespace('door', description='Door control operations')
 ns_digital = api.namespace('digital', description='LED and digital output control')
 ns_servo = api.namespace('servo', description='Direct servo control')
 ns_system = api.namespace('system', description='System information and sequences')
+ns_ir = api.namespace('ir', description='IR control operations')
 
 # API models for documentation
 state_model = api.model('StateResponse', {
@@ -630,6 +644,13 @@ status_model = api.model('StatusResponse', {
 sequence_model = api.model('SequenceResponse', {
     'status': fields.String(description='Operation status'),
     'current_state': fields.String(description='Current system state after sequence')
+})
+
+ir_learn_model = api.model('IRLearnResponse', {
+    'status': fields.String(description='IR learning status'),
+    'message': fields.String(description='IR learning status message'),
+    'timeout': fields.Integer(description='IR learning timeout in seconds'),
+    'learning': fields.Boolean(description='Whether IR learning is active')
 })
 
 @ns_servo.route('/<string:name>')
@@ -783,6 +804,66 @@ class DoorControl(Resource):
             else:
                 print(f"❌ Failed to set {name} door to angle {angle}°")
                 api.abort(404, 'Unknown door')
+
+@ns_ir.route('/learn')
+class IRLearn(Resource):
+    @ns_ir.doc('learn_ir_signal')
+    @ns_ir.marshal_with(ir_learn_model)
+    def post(self):
+        '''Start IR signal learning mode'''
+        global ir_learning_mode, ir_learning_start_time
+        
+        if ir_learning_mode:
+            return {
+                'status': 'already_learning',
+                'message': 'IR learning mode is already active',
+                'timeout': int(ir_learning_timeout - (time.time() - ir_learning_start_time)),
+                'learning': True
+            }
+        
+        # Start learning mode
+        ir_learning_mode = True
+        ir_learning_start_time = time.time()
+        
+        logger.info("IR learning mode activated")
+        print("🔴 IR learning mode activated - waiting for signal...")
+        
+        return {
+            'status': 'learning_started',
+            'message': 'IR learning mode activated. Send an IR signal within 30 seconds.',
+            'timeout': int(ir_learning_timeout),
+            'learning': True
+        }
+    
+    @ns_ir.doc('get_ir_learning_status')
+    @ns_ir.marshal_with(ir_learn_model)
+    def get(self):
+        '''Get current IR learning status'''
+        if ir_learning_mode:
+            remaining_time = max(0, int(ir_learning_timeout - (time.time() - ir_learning_start_time)))
+            if remaining_time <= 0:
+                # Learning has timed out
+                global ir_learning_mode
+                ir_learning_mode = False
+                return {
+                    'status': 'timeout',
+                    'message': 'IR learning mode timed out',
+                    'timeout': 0,
+                    'learning': False
+                }
+            return {
+                'status': 'learning_active',
+                'message': f'IR learning mode active. {remaining_time} seconds remaining.',
+                'timeout': remaining_time,
+                'learning': True
+            }
+        else:
+            return {
+                'status': 'not_learning',
+                'message': 'IR learning mode is not active',
+                'timeout': 0,
+                'learning': False
+            }
 
 # Servo testing and calibration models
 servo_info_model = api.model('ServoInfo', {
@@ -1327,9 +1408,26 @@ def input_monitor():
     # Set up IR receiver callback
     if ir_receiver is not None:
         def ir_signal_received():
-            global door_states, last_ir_time
+            global door_states, last_ir_time, ir_learning_mode, ir_learning_start_time, learned_ir_signal
             current_time = time.time()
             
+            # Check if we're in learning mode
+            if ir_learning_mode:
+                # Check if learning has timed out
+                if current_time - ir_learning_start_time > ir_learning_timeout:
+                    ir_learning_mode = False
+                    logger.info("IR learning mode timed out")
+                    print("🔴 IR learning mode timed out")
+                    return
+                
+                # We're in learning mode and got a signal - learn it!
+                ir_learning_mode = False
+                learned_ir_signal = current_time  # Simple timestamp as signal identifier
+                logger.info(f"IR signal learned successfully at {current_time}")
+                print(f"✅ IR signal learned successfully! New signal will now open console door.")
+                return
+            
+            # Normal operation mode - debouncing and door control
             # Debouncing: ignore signals that come too quickly
             if current_time - last_ir_time < ir_debounce_delay:
                 logger.debug(f"IR signal ignored - debounce active ({current_time - last_ir_time:.2f}s since last)")
