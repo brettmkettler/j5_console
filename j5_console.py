@@ -196,61 +196,93 @@ red_toggle_active = False
 orange_flash_thread = None
 orange_flash_stop_event = Event()
 
-# IR receiver debouncing
+# IR receiver debouncing and pattern recognition
 last_ir_time = 0
 ir_debounce_delay = 0.5  # 500ms between IR signals (allows new button presses)
+ir_pulse_times = []  # Store pulse timing for pattern recognition
+ir_pattern_timeout = 0.2  # 200ms timeout for pattern completion
+ir_pattern_tolerance = 0.05  # 50ms tolerance for pattern matching
 
 # IR learning state
 ir_learning_mode = False
 ir_learning_timeout = 30.0  # 30 seconds timeout for learning
 ir_learning_start_time = 0
 learned_ir_signal = None
+ir_signal_file = '/tmp/j5_learned_ir_signal.json'
 
 def save_learned_ir_signal(signal_data):
     """Save learned IR signal to persistent storage"""
     try:
         ir_data = {
             'learned_signal': signal_data,
-            'timestamp': time.time(),
-            'version': '1.0'
+            'learned_pattern': signal_data.get('pattern', []),  # Store timing pattern
+            'timestamp': time.time()
         }
-        with open('/tmp/j5_learned_ir_signal.json', 'w') as f:
+        
+        with open(ir_signal_file, 'w') as f:
             json.dump(ir_data, f, indent=2)
-        logger.info(f"IR signal saved to /tmp/j5_learned_ir_signal.json")
-        print(f"💾 IR signal saved to /tmp/j5_learned_ir_signal.json")
+        
+        logger.info(f"IR signal saved to {ir_signal_file}")
+        print(f"💾 IR signal saved to {ir_signal_file}")
+        print("💾 IR signal saved and will persist across restarts")
         return True
     except Exception as e:
-        logger.error(f"Failed to save IR signal: {e}")
-        print(f"❌ Failed to save IR signal: {e}")
+        logger.error(f"Error saving IR signal: {e}")
+        print(f"❌ Error saving IR signal: {e}")
         return False
 
 def load_learned_ir_signal():
     """Load learned IR signal from persistent storage"""
     global learned_ir_signal
     try:
-        if os.path.exists('/tmp/j5_learned_ir_signal.json'):
-            with open('/tmp/j5_learned_ir_signal.json', 'r') as f:
+        if os.path.exists(ir_signal_file):
+            with open(ir_signal_file, 'r') as f:
                 ir_data = json.load(f)
-            learned_ir_signal = ir_data.get('learned_signal')
-            logger.info(f"IR signal loaded from /tmp/j5_learned_ir_signal.json: {learned_ir_signal}")
-            print(f"📂 IR signal loaded from /tmp/j5_learned_ir_signal.json")
-            return True
+                learned_ir_signal = ir_data
+                logger.info(f"IR signal loaded from {ir_signal_file}")
+                print(f"� Learned IR signal loaded from storage")
+                return True
         else:
-            logger.info("No saved IR signal found")
-            print("📂 No saved IR signal found")
+            logger.info("No learned IR signal file found")
+            print("� No learned IR signal found - use learning mode first")
             return False
     except Exception as e:
-        logger.error(f"Failed to load IR signal: {e}")
-        print(f"❌ Failed to load IR signal: {e}")
+        logger.error(f"Error loading IR signal: {e}")
+        print(f"❌ Error loading IR signal: {e}")
         return False
 
-# Red toggle switch debouncing
-last_toggle_time = 0
-toggle_debounce_delay = 1.0  # 1 second between toggle events
+def patterns_match(pattern1, pattern2, tolerance=0.05):
+    """Compare two IR timing patterns with tolerance"""
+    if not pattern1 or not pattern2:
+        return False
+    
+    if len(pattern1) != len(pattern2):
+        return False
+    
+    for i in range(len(pattern1)):
+        diff = abs(pattern1[i] - pattern2[i])
+        if diff > tolerance:
+            return False
+    
+    return True
 
-# Events to control blinking threads
-blink_stop_event = Event()
-malfunction_stop_event = Event()
+def process_ir_pattern():
+    """Process collected IR pulse timings into a pattern"""
+    global ir_pulse_times
+    
+    if len(ir_pulse_times) < 2:
+        return []
+    
+    # Calculate intervals between pulses
+    intervals = []
+    for i in range(1, len(ir_pulse_times)):
+        interval = ir_pulse_times[i] - ir_pulse_times[i-1]
+        intervals.append(interval)
+    
+    # Clear pulse times for next pattern
+    ir_pulse_times = []
+    
+    return intervals
 
 # Function to blink orange lamp slowly (on 1s, off 1s) - ACTIVATED state
 def blink_orange_lamp():
@@ -1465,11 +1497,14 @@ def input_monitor():
     # Set up IR receiver callback
     if ir_receiver is not None:
         def ir_signal_received():
-            global door_states, last_ir_time, ir_learning_mode, ir_learning_start_time, learned_ir_signal
+            global door_states, last_ir_time, ir_learning_mode, ir_learning_start_time, learned_ir_signal, ir_pulse_times
             current_time = time.time()
             
             print(f"🔴 IR signal received at {current_time}")
             logger.info(f"IR signal received at {current_time}")
+            
+            # Add pulse time for pattern recognition
+            ir_pulse_times.append(current_time)
             
             # Check if we're in learning mode
             if ir_learning_mode:
@@ -1478,26 +1513,36 @@ def input_monitor():
                     ir_learning_mode = False
                     logger.info("IR learning mode timed out")
                     print("🔴 IR learning mode timed out")
+                    ir_pulse_times = []  # Clear pattern data
                     return
                 
-                # Learn this signal
-                learned_ir_signal = current_time
-                ir_learning_mode = False
+                # Check if pattern is complete (no new pulses for pattern_timeout)
+                if len(ir_pulse_times) > 1:
+                    time_since_last = current_time - ir_pulse_times[-2]
+                    if time_since_last > ir_pattern_timeout:
+                        # Pattern complete, learn it
+                        pattern = process_ir_pattern()
+                        learned_ir_signal = {
+                            'timestamp': current_time,
+                            'pattern': pattern
+                        }
+                        ir_learning_mode = False
+                        
+                        logger.info(f"IR signal learned successfully with pattern: {pattern}")
+                        print("✅ IR signal learned successfully! Signal will now control console door.")
+                        
+                        # Save to persistent storage
+                        save_learned_ir_signal(learned_ir_signal)
+                        return
                 
-                logger.info(f"IR signal learned successfully at {current_time}")
-                print(f"✅ IR signal learned successfully! Signal will now control console door.")
-                
-                # Save the learned signal
-                if save_learned_ir_signal(learned_ir_signal):
-                    print(f"💾 IR signal saved and will persist across restarts")
-                else:
-                    print(f"⚠️ IR signal learned but failed to save to file")
+                # Still collecting pattern, return early
                 return
             
-            # Normal operation mode - check if we have a learned signal
-            if learned_ir_signal is None:
+            # Not in learning mode - check if we have a learned signal
+            if not learned_ir_signal:
                 logger.debug("No learned IR signal - ignoring")
-                print("🔴 No learned IR signal - ignoring")
+                print("🔴 No learned signal - use learning mode first")
+                ir_pulse_times = []  # Clear pattern data
                 return
             
             # Debouncing check
@@ -1506,15 +1551,34 @@ def input_monitor():
                 print(f"🔴 IR signal ignored - debounce active")
                 return
             
-            # Execute door operation
-            last_ir_time = current_time
-            ir_thread = Thread(target=ir_door_operation, daemon=True)
-            ir_thread.start()
-
-    # Attach the callback to the IR receiver
-    ir_receiver.when_pressed = ir_signal_received
-    logger.info("IR receiver callback attached")
-    print("🔴 IR receiver callback attached - ready to receive signals")
+            # Check if pattern is complete (no new pulses for pattern_timeout)
+            if len(ir_pulse_times) > 1:
+                time_since_last = current_time - ir_pulse_times[-2]
+                if time_since_last > ir_pattern_timeout:
+                    # Pattern complete, check if it matches learned pattern
+                    current_pattern = process_ir_pattern()
+                    learned_pattern = learned_ir_signal.get('pattern', [])
+                    
+                    if patterns_match(current_pattern, learned_pattern, ir_pattern_tolerance):
+                        logger.info("IR pattern matches learned signal - executing door operation")
+                        print("✅ IR pattern matches - executing door operation")
+                        
+                        # Execute door operation
+                        last_ir_time = current_time
+                        ir_thread = Thread(target=ir_door_operation, daemon=True)
+                        ir_thread.start()
+                    else:
+                        logger.debug(f"IR pattern mismatch - Current: {current_pattern}, Learned: {learned_pattern}")
+                        print("🔴 IR pattern doesn't match learned signal - ignoring")
+                
+                return
+            
+            # Still collecting pattern for comparison
+            return
+        # Attach the callback to the IR receiver
+        ir_receiver.when_pressed = ir_signal_received
+        logger.info("IR receiver callback attached")
+        print("🔴 IR receiver callback attached - ready to receive signals")
     
     # Set up red toggle switch callbacks
     if red_toggle_switch is not None:
