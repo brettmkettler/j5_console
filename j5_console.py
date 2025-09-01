@@ -211,6 +211,9 @@ ir_pulse_times = []  # Track pulse timing for current signal
 ir_last_pulse_time = 0
 ir_pattern_timeout = 0.5  # 500ms timeout between pulses to end pattern
 
+# IR signal persistence file
+ir_signal_file = '/tmp/j5_learned_ir_signal.json'
+
 def save_learned_ir_signal(signal_data):
     """Save learned IR signal to persistent storage"""
     try:
