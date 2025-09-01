@@ -198,7 +198,7 @@ orange_flash_stop_event = Event()
 
 # IR receiver debouncing
 last_ir_time = 0
-ir_debounce_delay = 2.0  # 2 seconds between IR signals
+ir_debounce_delay = 0.5  # 500ms between IR signals (allows new button presses)
 
 # IR learning state
 ir_learning_mode = False
