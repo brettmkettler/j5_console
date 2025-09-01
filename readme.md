@@ -16,7 +16,7 @@
    cd ~/Desktop
    sudo bash install_service.sh
    ```
-
+#
 3. **Done!** The J5 console will now start automatically on boot.
 
 ---
