@@ -165,7 +165,7 @@ servo_config = {
         'center_angle': 70,
         'description': 'Right door servo',
         'open_angle': 100,   # Angle for open position
-        'closed_angle': 40   # Angle for closed position
+        'closed_angle': 35   # Angle for closed position
     }
 }
 
