@@ -197,6 +197,10 @@ red_toggle_active = False
 orange_flash_thread = None
 orange_flash_stop_event = Event()
 
+# Red toggle switch debouncing
+last_toggle_time = 0
+toggle_debounce_delay = 1.0  # 1 second debounce to prevent rapid toggling
+
 # IR receiver debouncing and pattern recognition
 last_ir_time = 0
 ir_debounce_delay = 0.5  # 500ms between IR signals (allows new button presses)
