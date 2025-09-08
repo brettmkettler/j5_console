@@ -144,7 +144,7 @@ servo_config = {
         'center_angle': 75,  # Center/neutral position
         'description': 'Left door servo',
         'open_angle': 50,    # Angle for open position
-        'closed_angle': 100  # Angle for closed position
+        'closed_angle': 105  # Angle for closed position
     },
     'console_door': {
         'device': console_door,
@@ -155,7 +155,7 @@ servo_config = {
         'center_angle': 90,
         'description': 'Console door servo',
         'open_angle': 80,    # Angle for open position
-        'closed_angle': 140  # Angle for closed position
+        'closed_angle': 135  # Angle for closed position
     },
     'right_door': {
         'device': right_door,
