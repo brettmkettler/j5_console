@@ -11,6 +11,7 @@ import os
 import signal
 import subprocess
 import logging
+import requests
 from gpiozero.exc import GPIOPinInUse, GPIODeviceClosed
 
 # Configure logging
@@ -1162,8 +1163,23 @@ def red_toggle_sequence():
     """Execute the red toggle switch sequence"""
     global red_toggle_active, orange_flash_thread, orange_flash_stop_event
     
-    logger.info("Red toggle switch activated - starting 10-second sequence")
+    logger.info("Red toggle switch activated - starting sequence with screen ON")
     print("\n🔴 RED TOGGLE SWITCH ACTIVATED!")
+    print("📺 Turning screen ON...")
+    
+    # Call screen ON API first
+    try:
+        response = requests.post('http://localhost:3000/api/screen/on', timeout=5)
+        if response.status_code == 200:
+            logger.info("Screen turned ON successfully")
+            print("✅ Screen turned ON")
+        else:
+            logger.warning(f"Screen ON API returned status {response.status_code}")
+            print(f"⚠️ Screen ON API returned status {response.status_code}")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to call screen ON API: {e}")
+        print(f"❌ Failed to turn screen ON: {e}")
+    
     print("🚨 Activating all lamps and LEDs for 10 seconds...")
     
     red_toggle_active = True
