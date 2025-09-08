@@ -166,7 +166,7 @@ servo_config = {
         'center_angle': 70,
         'description': 'Right door servo',
         'open_angle': 100,   # Angle for open position
-        'closed_angle': 30   # Angle for closed position
+        'closed_angle': 25   # Angle for closed position
     }
 }
 
@@ -1396,29 +1396,45 @@ def toggle_console_door():
 # Functions to control battery doors (left and right simultaneously)
 def open_battery_doors():
     global door_states
-    logger.info("Opening battery doors (right first, then left)")
-    print("\n🔋 Opening battery doors...")
+    logger.info("Opening battery doors simultaneously (right door finishes 0.1s after left)")
+    print("\n🔋 Opening battery doors simultaneously...")
     
     # Get configured open angles for both doors
     left_open_angle = servo_config['left_door']['open_angle']
     right_open_angle = servo_config['right_door']['open_angle']
     
     logger.debug(f"Left door open angle: {left_open_angle}°, Right door open angle: {right_open_angle}°")
-    print(f"📍 Opening right door first to {right_open_angle}°, then left door to {left_open_angle}°")
+    print(f"📍 Opening both doors simultaneously - left to {left_open_angle}°, right to {right_open_angle}° (right finishes 0.1s later)")
     
-    # Open right door first
-    print("🔓 Opening right door first...")
-    right_success = set_servo_angle('right_door', right_open_angle)
+    # Start both doors simultaneously using threads
+    import threading
     
-    # Small delay before opening left door
-    time.sleep(0.1)
+    left_success = [False]  # Use list to allow modification in thread
+    right_success = [False]
     
-    # Then open left door
-    print("🔓 Opening left door...")
-    left_success = set_servo_angle('left_door', left_open_angle)
+    def open_left():
+        print("🔓 Opening left door...")
+        left_success[0] = set_servo_angle('left_door', left_open_angle)
+    
+    def open_right():
+        # Small delay so right door finishes 0.1s after left
+        time.sleep(0.1)
+        print("🔓 Opening right door (0.1s later)...")
+        right_success[0] = set_servo_angle('right_door', right_open_angle)
+    
+    # Start both threads simultaneously
+    left_thread = threading.Thread(target=open_left)
+    right_thread = threading.Thread(target=open_right)
+    
+    left_thread.start()
+    right_thread.start()
+    
+    # Wait for both to complete
+    left_thread.join()
+    right_thread.join()
     
     # Update door states
-    if left_success:
+    if left_success[0]:
         door_states['left_door'] = 'open'
         logger.info("Left battery door opened successfully")
         print("✅ Left battery door opened successfully")
@@ -1426,7 +1442,7 @@ def open_battery_doors():
         logger.error("Failed to open left battery door")
         print("❌ Failed to open left battery door")
     
-    if right_success:
+    if right_success[0]:
         door_states['right_door'] = 'open'
         logger.info("Right battery door opened successfully")
         print("✅ Right battery door opened successfully")
@@ -1434,10 +1450,10 @@ def open_battery_doors():
         logger.error("Failed to open right battery door")
         print("❌ Failed to open right battery door")
     
-    overall_success = left_success and right_success
+    overall_success = left_success[0] and right_success[0]
     if overall_success:
-        logger.info("Both battery doors opened successfully")
-        print("✅ Both battery doors opened successfully\n")
+        logger.info("Both battery doors opened successfully with simultaneous timing")
+        print("✅ Both battery doors opened successfully with simultaneous timing\n")
     else:
         logger.warning("One or both battery doors failed to open")
         print("⚠️ One or both battery doors failed to open\n")
@@ -1446,29 +1462,45 @@ def open_battery_doors():
 
 def close_battery_doors():
     global door_states
-    logger.info("Closing battery doors (left first, then right)")
-    print("\n🔋 Closing battery doors...")
+    logger.info("Closing battery doors simultaneously (right door finishes 0.1s after left)")
+    print("\n🔋 Closing battery doors simultaneously...")
     
     # Get configured closed angles for both doors
     left_closed_angle = servo_config['left_door']['closed_angle']
     right_closed_angle = servo_config['right_door']['closed_angle']
     
     logger.debug(f"Left door closed angle: {left_closed_angle}°, Right door closed angle: {right_closed_angle}°")
-    print(f"📍 Closing left door first to {left_closed_angle}°, then right door to {right_closed_angle}°")
+    print(f"📍 Closing both doors simultaneously - left to {left_closed_angle}°, right to {right_closed_angle}° (right finishes 0.1s later)")
     
-    # Close left door first
-    print("🔒 Closing left door first...")
-    left_success = set_servo_angle('left_door', left_closed_angle)
+    # Start both doors simultaneously using threads
+    import threading
     
-    # Small delay before closing right door
-    time.sleep(0.1)
+    left_success = [False]  # Use list to allow modification in thread
+    right_success = [False]
     
-    # Then close right door
-    print("🔒 Closing right door...")
-    right_success = set_servo_angle('right_door', right_closed_angle)
+    def close_left():
+        print("🔒 Closing left door...")
+        left_success[0] = set_servo_angle('left_door', left_closed_angle)
+    
+    def close_right():
+        # Small delay so right door finishes 0.1s after left
+        time.sleep(0.1)
+        print("🔒 Closing right door (0.1s later)...")
+        right_success[0] = set_servo_angle('right_door', right_closed_angle)
+    
+    # Start both threads simultaneously
+    left_thread = threading.Thread(target=close_left)
+    right_thread = threading.Thread(target=close_right)
+    
+    left_thread.start()
+    right_thread.start()
+    
+    # Wait for both to complete
+    left_thread.join()
+    right_thread.join()
     
     # Update door states
-    if left_success:
+    if left_success[0]:
         door_states['left_door'] = 'closed'
         logger.info("Left battery door closed successfully")
         print("✅ Left battery door closed successfully")
@@ -1476,7 +1508,7 @@ def close_battery_doors():
         logger.error("Failed to close left battery door")
         print("❌ Failed to close left battery door")
     
-    if right_success:
+    if right_success[0]:
         door_states['right_door'] = 'closed'
         logger.info("Right battery door closed successfully")
         print("✅ Right battery door closed successfully")
@@ -1484,10 +1516,10 @@ def close_battery_doors():
         logger.error("Failed to close right battery door")
         print("❌ Failed to close right battery door")
     
-    overall_success = left_success and right_success
+    overall_success = left_success[0] and right_success[0]
     if overall_success:
-        logger.info("Both battery doors closed successfully")
-        print("✅ Both battery doors closed successfully\n")
+        logger.info("Both battery doors closed successfully with simultaneous timing")
+        print("✅ Both battery doors closed successfully with simultaneous timing\n")
     else:
         logger.warning("One or both battery doors failed to close")
         print("⚠️ One or both battery doors failed to close\n")
