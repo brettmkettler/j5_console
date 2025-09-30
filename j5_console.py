@@ -66,7 +66,8 @@ pin_factory = LGPIOFactory()
 
 # First check and release any conflicting pins
 # Added pin 26 for red toggle switch, pin 18 (IR receiver) is enabled
-check_and_release_gpio_pins([5, 6, 12, 16, 18, 19, 26, 27, 22, 24])
+# Added pins 14 and 15 for backup door control
+check_and_release_gpio_pins([5, 6, 12, 14, 15, 16, 18, 19, 26, 27, 22, 24])
 
 # Initialize each device individually
 # Red toggle switch on GPIO 26 and IR receiver on pin 18 are both enabled
@@ -99,10 +100,22 @@ console_door = Servo(16, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000, pin
 console_door.value = None  # Disable PWM on startup - servo stays in current position
 logger.info(f"Successfully initialized console_door servo: {console_door}, type: {type(console_door)}")
 
+# Initialize backup console_door servo device on GPIO 14
+logger.info("Initializing backup console_door servo on GPIO pin 14")
+console_door_backup = Servo(14, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000, pin_factory=pin_factory)
+console_door_backup.value = None  # Disable PWM on startup - servo stays in current position
+logger.info(f"Successfully initialized backup console_door servo on GPIO 14: {console_door_backup}")
+
 # Initialize right_door servo device
 right_door = Servo(19, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000, pin_factory=pin_factory)
 right_door.value = None  # Disable PWM on startup - servo stays in current position
 logger.info(f"Successfully initialized right_door servo on GPIO 19: {right_door}")
+
+# Initialize backup battery_doors servo device on GPIO 15 (controls both battery doors as backup)
+logger.info("Initializing backup battery_doors servo on GPIO pin 15")
+battery_doors_backup = Servo(15, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000, pin_factory=pin_factory)
+battery_doors_backup.value = None  # Disable PWM on startup - servo stays in current position
+logger.info(f"Successfully initialized backup battery_doors servo on GPIO 15: {battery_doors_backup}")
 
 # Startup indicator LEDs (3 LEDs in series) - GPIO 27 Pin 13
 startup_led = LED(27, pin_factory=pin_factory)
@@ -157,6 +170,17 @@ servo_config = {
         'open_angle': 80,    # Angle for open position
         'closed_angle': 135  # Angle for closed position
     },
+    'console_door_backup': {
+        'device': console_door_backup,
+        'min_pulse': 0.5,
+        'max_pulse': 2.5,
+        'min_angle': 0,
+        'max_angle': 180,
+        'center_angle': 90,
+        'description': 'Console door backup servo (GPIO 14)',
+        'open_angle': 80,    # Same as primary console door
+        'closed_angle': 135
+    },
     'right_door': {
         'device': right_door,
         'min_pulse': 0.5,    # Adjusted for better response
@@ -167,6 +191,17 @@ servo_config = {
         'description': 'Right door servo',
         'open_angle': 100,   # Angle for open position
         'closed_angle': 30   # Angle for closed position
+    },
+    'battery_doors_backup': {
+        'device': battery_doors_backup,
+        'min_pulse': 0.5,
+        'max_pulse': 2.5,
+        'min_angle': 0,
+        'max_angle': 180,
+        'center_angle': 75,
+        'description': 'Battery doors backup servo (GPIO 15)',
+        'open_angle': 75,    # Average of left (50) and right (100) for dual control
+        'closed_angle': 85   # Average of left (140) and right (30) for dual control
     }
 }
 
@@ -1348,6 +1383,11 @@ def open_console_door():
     print(f"📍 Setting console_door to open position: {open_angle}°")
     
     success = set_servo_angle('console_door', open_angle)
+    
+    # Also move backup console door
+    backup_success = set_servo_angle('console_door_backup', open_angle)
+    logger.debug(f"Backup console door result: {backup_success}")
+    
     if success:
         door_states['console_door'] = 'open'
         logger.info(f"Console door opened successfully. State set to: {door_states['console_door']}")
@@ -1369,6 +1409,11 @@ def close_console_door():
     print(f"📍 Setting console_door to closed position: {closed_angle}°")
     
     success = set_servo_angle('console_door', closed_angle)
+    
+    # Also move backup console door
+    backup_success = set_servo_angle('console_door_backup', closed_angle)
+    logger.debug(f"Backup console door result: {backup_success}")
+    
     if success:
         door_states['console_door'] = 'closed'
         logger.info(f"Console door closed successfully. State set to: {door_states['console_door']}")
@@ -1402,6 +1447,7 @@ def open_battery_doors():
     # Get configured open angles for both doors
     left_open_angle = servo_config['left_door']['open_angle']
     right_open_angle = servo_config['right_door']['open_angle']
+    backup_open_angle = servo_config['battery_doors_backup']['open_angle']
     
     logger.debug(f"Left door open angle: {left_open_angle}°, Right door open angle: {right_open_angle}°")
     print(f"📍 Opening both doors simultaneously - left to {left_open_angle}°, right to {right_open_angle}° (right finishes 0.1s later)")
@@ -1411,6 +1457,7 @@ def open_battery_doors():
     
     left_success = [False]  # Use list to allow modification in thread
     right_success = [False]
+    backup_success = [False]
     
     def open_left():
         print("🔓 Opening left door...")
@@ -1422,16 +1469,23 @@ def open_battery_doors():
         print("🔓 Opening right door (0.1s later)...")
         right_success[0] = set_servo_angle('right_door', right_open_angle)
     
+    def open_backup():
+        print("🔓 Opening backup battery doors...")
+        backup_success[0] = set_servo_angle('battery_doors_backup', backup_open_angle)
+    
     # Start both threads simultaneously
     left_thread = threading.Thread(target=open_left)
     right_thread = threading.Thread(target=open_right)
+    backup_thread = threading.Thread(target=open_backup)
     
     left_thread.start()
     right_thread.start()
+    backup_thread.start()
     
     # Wait for both to complete
     left_thread.join()
     right_thread.join()
+    backup_thread.join()
     
     # Update door states
     if left_success[0]:
@@ -1468,6 +1522,7 @@ def close_battery_doors():
     # Get configured closed angles for both doors
     left_closed_angle = servo_config['left_door']['closed_angle']
     right_closed_angle = servo_config['right_door']['closed_angle']
+    backup_closed_angle = servo_config['battery_doors_backup']['closed_angle']
     
     logger.debug(f"Left door closed angle: {left_closed_angle}°, Right door closed angle: {right_closed_angle}°")
     print(f"📍 Closing both doors simultaneously - left to {left_closed_angle}°, right to {right_closed_angle}° (right finishes 0.1s later)")
@@ -1477,6 +1532,7 @@ def close_battery_doors():
     
     left_success = [False]  # Use list to allow modification in thread
     right_success = [False]
+    backup_success = [False]
     
     def close_left():
         print("🔒 Closing left door...")
@@ -1488,16 +1544,23 @@ def close_battery_doors():
         print("🔒 Closing right door (0.1s later)...")
         right_success[0] = set_servo_angle('right_door', right_closed_angle)
     
+    def close_backup():
+        print("🔒 Closing backup battery doors...")
+        backup_success[0] = set_servo_angle('battery_doors_backup', backup_closed_angle)
+    
     # Start both threads simultaneously
     left_thread = threading.Thread(target=close_left)
     right_thread = threading.Thread(target=close_right)
+    backup_thread = threading.Thread(target=close_backup)
     
     left_thread.start()
     right_thread.start()
+    backup_thread.start()
     
     # Wait for both to complete
     left_thread.join()
     right_thread.join()
+    backup_thread.join()
     
     # Update door states
     if left_success[0]:
@@ -1541,165 +1604,6 @@ def toggle_battery_doors():
         print("Both doors are open, closing both...")
         return close_battery_doors()
 
-# Button and IR receiver monitoring thread
-def input_monitor():
-    logger.info("Input monitoring started (GPIO 26 red toggle switch, GPIO 18 IR receiver enabled)")
-    print("Input monitoring started (GPIO 26 red toggle switch, GPIO 18 IR receiver enabled)")
-    
-    # Set up IR receiver callback
-    if ir_receiver is not None:
-        def ir_signal_received():
-            global door_states, last_ir_time, ir_learning_mode, ir_learning_start_time, learned_ir_signal, ir_pulse_times
-            current_time = time.time()
-            
-            print(f"🔴 IR signal received at {current_time}")
-            logger.info(f"IR signal received at {current_time}")
-            
-            # Add pulse time for pattern recognition
-            ir_pulse_times.append(current_time)
-            
-            # Check if we're in learning mode
-            if ir_learning_mode:
-                # Check if learning has timed out
-                if current_time - ir_learning_start_time > ir_learning_timeout:
-                    ir_learning_mode = False
-                    logger.info("IR learning mode timed out")
-                    print("🔴 IR learning mode timed out")
-                    ir_pulse_times = []  # Clear pattern data
-                    return
-                
-                # Check if pattern is complete (no new pulses for pattern_timeout)
-                if len(ir_pulse_times) > 1:
-                    time_since_last = current_time - ir_pulse_times[-2]
-                    if time_since_last > ir_pattern_timeout:
-                        # Pattern complete, learn it
-                        pattern = process_ir_pattern()
-                        learned_ir_signal = {
-                            'timestamp': current_time,
-                            'pattern': pattern
-                        }
-                        ir_learning_mode = False
-                        
-                        logger.info(f"IR signal learned successfully with pattern: {pattern}")
-                        print("✅ IR signal learned successfully! Signal will now control console door.")
-                        
-                        # Save to persistent storage
-                        save_learned_ir_signal(learned_ir_signal)
-                        return
-                
-                # Still collecting pattern, return early
-                return
-            
-            # Not in learning mode - check if we have a learned signal
-            if not learned_ir_signal:
-                logger.debug("No learned IR signal - ignoring")
-                print("🔴 No learned signal - use learning mode first")
-                ir_pulse_times = []  # Clear pattern data
-                return
-            
-            # Debouncing check
-            if current_time - last_ir_time < ir_debounce_delay:
-                logger.debug(f"IR signal ignored - debounce active")
-                print(f"🔴 IR signal ignored - debounce active")
-                return
-            
-            # Check if pattern is complete (no new pulses for pattern_timeout)
-            if len(ir_pulse_times) > 1:
-                time_since_last = current_time - ir_pulse_times[-2]
-                if time_since_last > ir_pattern_timeout:
-                    # Pattern complete, check if it matches learned pattern
-                    current_pattern = process_ir_pattern()
-                    learned_pattern = learned_ir_signal.get('pattern', [])
-                    
-                    if patterns_match(current_pattern, learned_pattern, ir_pattern_tolerance):
-                        logger.info("IR pattern matches learned signal - executing door operation")
-                        print("✅ IR pattern matches - executing door operation")
-                        
-                        # Execute door operation
-                        last_ir_time = current_time
-                        ir_thread = Thread(target=ir_door_operation, daemon=True)
-                        ir_thread.start()
-                    else:
-                        logger.debug(f"IR pattern mismatch - Current: {current_pattern}, Learned: {learned_pattern}")
-                        print("🔴 IR pattern doesn't match learned signal - ignoring")
-                
-                return
-            
-            # Still collecting pattern for comparison
-            return
-        # Attach the callback to the IR receiver
-        ir_receiver.when_pressed = ir_signal_received
-        logger.info("IR receiver callback attached")
-        print("🔴 IR receiver callback attached - ready to receive signals")
-    
-    # Set up red toggle switch callbacks
-    if red_toggle_switch is not None:
-        def red_toggle_pressed():
-            global last_toggle_time
-            current_time = time.time()
-            
-            # Debouncing: ignore rapid toggle events
-            if current_time - last_toggle_time < toggle_debounce_delay:
-                logger.debug(f"Red toggle PRESSED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
-                print(f"🔴 Red toggle PRESSED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
-                return
-            
-            last_toggle_time = current_time
-            logger.info("Red toggle switch pressed (activated)")
-            print("🔴 Red toggle switch PRESSED - starting sequence")
-            try:
-                # Run the sequence in a separate thread to avoid blocking
-                toggle_thread = Thread(target=red_toggle_sequence, daemon=True)
-                toggle_thread.start()
-            except Exception as e:
-                logger.error(f"Error starting red toggle sequence: {e}")
-                print(f"❌ Error starting red toggle sequence: {e}")
-        
-        def red_toggle_released():
-            global last_toggle_time
-            current_time = time.time()
-            
-            # Debouncing: ignore rapid toggle events
-            if current_time - last_toggle_time < toggle_debounce_delay:
-                logger.debug(f"Red toggle RELEASED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
-                print(f"🔴 Red toggle RELEASED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
-                return
-            
-            last_toggle_time = current_time
-            logger.info("Red toggle switch released (deactivated)")
-            print("🔴 Red toggle switch RELEASED - starting shutdown sequence")
-            try:
-                # Run the shutdown sequence in a separate thread to avoid blocking
-                shutdown_thread = Thread(target=red_toggle_off, daemon=True)
-                shutdown_thread.start()
-            except Exception as e:
-                logger.error(f"Error starting red toggle shutdown sequence: {e}")
-                print(f"❌ Error starting red toggle shutdown sequence: {e}")
-        
-        # Attach the callbacks to the red toggle switch
-        red_toggle_switch.when_pressed = red_toggle_pressed
-        red_toggle_switch.when_released = red_toggle_released
-        logger.info("Red toggle switch callbacks attached")
-        print("🔴 Red toggle switch callbacks attached - ready for activation")
-    
-    try:
-        while True:
-            try:
-                # GPIO 26 (button) is disabled, GPIO 18 (IR receiver) is active
-                # IR receiver uses callback, so we just need to keep the thread alive
-                pass
-            except Exception as e:
-                logger.error(f"Error in input monitoring: {e}")
-                print(f"Error in input monitoring: {e}")
-            
-            time.sleep(0.1)  # Check every 100ms
-    except KeyboardInterrupt:
-        logger.info("Input monitoring stopped")
-        print("Input monitoring stopped")
-    except Exception as e:
-        logger.error(f"Input monitor thread error: {e}")
-        print(f"Input monitor thread error: {e}")
-
 # GPIO cleanup function
 def cleanup_gpio():
     """Clean up GPIO resources"""
@@ -1714,8 +1618,9 @@ def cleanup_gpio():
         
         # Close all GPIO devices
         devices_to_close = [
-            orange_lamp, red_lamp, left_door, console_door, right_door,
-            startup_led, malfunction_led1, other2, ir_receiver, red_toggle_switch
+            orange_lamp, red_lamp, left_door, console_door, console_door_backup, 
+            right_door, battery_doors_backup, startup_led, malfunction_led1, 
+            other2, ir_receiver, red_toggle_switch
         ]
         
         for device in devices_to_close:
