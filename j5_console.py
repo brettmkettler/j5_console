@@ -13,6 +13,15 @@ import subprocess
 import logging
 import requests
 from gpiozero.exc import GPIOPinInUse, GPIODeviceClosed
+import pigpio
+
+# Try to import pigpio for RC PWM decoding
+try:
+    PIGPIO_AVAILABLE = True
+except ImportError:
+    PIGPIO_AVAILABLE = False
+    print("Warning: pigpio not available - RC controller will not work")
+    print("Install with: sudo apt-get install pigpio python3-pigpio")
 
 # Configure logging
 logging.basicConfig(
@@ -106,12 +115,28 @@ logger.info(f"Successfully initialized right_door servo on GPIO 19: {right_door}
 
 # Initialize RC controller inputs for door control
 logger.info("Initializing RC controller input on GPIO 14 for console door control")
-rc_console_door = Button(14, pull_up=True, pin_factory=pin_factory)
-logger.info(f"Successfully initialized RC console door input on GPIO 14: {rc_console_door}")
+if PIGPIO_AVAILABLE:
+    rc_pi = pigpio.pi()
+    if rc_pi.connected:
+        rc_pi.set_mode(14, pigpio.INPUT)
+        rc_pi.set_pull_up_down(14, pigpio.PUD_DOWN)
+        logger.info("Successfully initialized RC console door input on GPIO 14 using pigpio")
+    else:
+        logger.error("Failed to connect to pigpio daemon - RC controller will not work")
+        print("ERROR: pigpio daemon not running. Start with: sudo pigpiod")
+        PIGPIO_AVAILABLE = False
+else:
+    rc_console_door = Button(14, pull_up=True, pin_factory=pin_factory)
+    logger.info(f"Successfully initialized RC console door input on GPIO 14: {rc_console_door}")
 
 logger.info("Initializing RC controller input on GPIO 15 for battery doors control")
-rc_battery_doors = Button(15, pull_up=True, pin_factory=pin_factory)
-logger.info(f"Successfully initialized RC battery doors input on GPIO 15: {rc_battery_doors}")
+if PIGPIO_AVAILABLE and rc_pi and rc_pi.connected:
+    rc_pi.set_mode(15, pigpio.INPUT)
+    rc_pi.set_pull_up_down(15, pigpio.PUD_DOWN)
+    logger.info("Successfully initialized RC battery doors input on GPIO 15 using pigpio")
+else:
+    rc_battery_doors = Button(15, pull_up=True, pin_factory=pin_factory)
+    logger.info(f"Successfully initialized RC battery doors input on GPIO 15: {rc_battery_doors}")
 
 # Startup indicator LEDs (3 LEDs in series) - GPIO 27 Pin 13
 startup_led = LED(27, pin_factory=pin_factory)
@@ -201,6 +226,17 @@ door_states = {
     'right_door': 'closed'
 }
 
+# RC controller PWM decoding state
+rc_pi = None
+rc_console_door_pulse = 0
+rc_battery_doors_pulse = 0
+rc_console_door_last_trigger = 0
+rc_battery_doors_last_trigger = 0
+rc_console_door_start_tick = 0
+rc_battery_doors_start_tick = 0
+rc_trigger_threshold = 1700  # Trigger when pulse > 1700us (stick pushed)
+rc_debounce_delay = 1.0  # 1 second between triggers
+
 # Event objects for controlling LED threads
 blink_stop_event = Event()
 malfunction_stop_event = Event()
@@ -241,12 +277,12 @@ def save_learned_ir_signal(signal_data):
             json.dump(ir_data, f, indent=2)
         
         logger.info(f"IR signal saved to {ir_signal_file}")
-        print(f"💾 IR signal saved to {ir_signal_file}")
-        print("💾 IR signal saved and will persist across restarts")
+        print(f" IR signal saved to {ir_signal_file}")
+        print(" IR signal saved and will persist across restarts")
         return True
     except Exception as e:
         logger.error(f"Error saving IR signal: {e}")
-        print(f"❌ Error saving IR signal: {e}")
+        print(f" Error saving IR signal: {e}")
         return False
 
 def load_learned_ir_signal():
@@ -258,15 +294,15 @@ def load_learned_ir_signal():
                 ir_data = json.load(f)
                 learned_ir_signal = ir_data
                 logger.info(f"IR signal loaded from {ir_signal_file}")
-                print(f"� Learned IR signal loaded from storage")
+                print(f" Learned IR signal loaded from storage")
                 return True
         else:
             logger.info("No learned IR signal file found")
-            print("� No learned IR signal found - use learning mode first")
+            print(" No learned IR signal found - use learning mode first")
             return False
     except Exception as e:
         logger.error(f"Error loading IR signal: {e}")
-        print(f"❌ Error loading IR signal: {e}")
+        print(f" Error loading IR signal: {e}")
         return False
 
 def patterns_match(pattern1, pattern2, tolerance=0.05):
@@ -430,7 +466,7 @@ def set_servo_angle(name, angle):
         # Set the servo position
         config['device'].value = servo_value
         
-        print(f"⚙️ {config['description']}: {angle}° (servo value: {servo_value:.3f})")
+        print(f" {config['description']}: {angle}° (servo value: {servo_value:.3f})")
         
         # Wait for servo to reach position
         time.sleep(1.5)
@@ -438,7 +474,7 @@ def set_servo_angle(name, angle):
         # Temporarily disabled PWM disable to test servo movement
         # config['device'].value = None  # For Servo class, None stops the servo
         # logger.debug(f"Servo {name} PWM disabled to prevent jittering")
-        # print(f"🔇 {config['description']} PWM disabled to prevent jittering")
+        # print(f" {config['description']} PWM disabled to prevent jittering")
         
         logger.debug(f"Servo {name} position set successfully")
         return True
@@ -469,7 +505,7 @@ def test_servo_sweep(name, start_angle=None, end_angle=None, step=5, delay=0.5):
     end = end_angle if end_angle is not None else config['max_angle']
     
     logger.info(f"Servo sweep parameters - name: {name}, start: {start}°, end: {end}°, step: {step}, delay: {delay}s")
-    print(f"🔄 Testing {config['description']} sweep: {start}° to {end}°")
+    print(f" Testing {config['description']} sweep: {start}° to {end}°")
     
     # Forward sweep
     logger.debug(f"Starting forward sweep for {name} from {start}° to {end}°")
@@ -490,7 +526,7 @@ def test_servo_sweep(name, start_angle=None, end_angle=None, step=5, delay=0.5):
     set_servo_angle(name, config['center_angle'])
     
     logger.info(f"Servo sweep test for {name} completed successfully")
-    print(f"✅ {config['description']} test complete")
+    print(f" {config['description']} test complete")
     return True
 
 def calibrate_servo(name, test_angles=[0, 45, 90, 135, 180]):
@@ -504,7 +540,7 @@ def calibrate_servo(name, test_angles=[0, 45, 90, 135, 180]):
     
     config = servo_config[name]
     logger.info(f"Calibrating {name} with current config: {config}")
-    print(f"🔧 Calibrating {config['description']}...")
+    print(f" Calibrating {config['description']}...")
     print(f"Current limits: {config['min_angle']}°-{config['max_angle']}°")
     print(f"Pulse range: {config['min_pulse']:.1f}ms-{config['max_pulse']:.1f}ms")
     
@@ -526,7 +562,7 @@ def calibrate_servo(name, test_angles=[0, 45, 90, 135, 180]):
     
     # Return to center
     set_servo_angle(name, config['center_angle'])
-    print(f"✅ Calibration complete for {config['description']}")
+    print(f" Calibration complete for {config['description']}")
     return True
 
 # Function to set digital output
@@ -793,7 +829,7 @@ class DoorControl(Resource):
         
         action = args['action']
         logger.info(f"Door API called: door={name}, action={action}, args={args}")
-        print(f"\n🎛️ Door API: {name} - Action: {action}")
+        print(f"\n Door API: {name} - Action: {action}")
         if action == 'open':
             if name == 'console_door':
                 logger.debug(f"Processing 'open' action for console_door")
@@ -811,13 +847,13 @@ class DoorControl(Resource):
                     api.abort(500, f'Error opening console door: {str(e)}')
             elif name in door_states:
                 open_angle = servo_config[name]['open_angle']
-                print(f"🔓 Opening {name} door to {open_angle}°")
+                print(f" Opening {name} door to {open_angle}°")
                 if set_servo_angle(name, open_angle):
                     door_states[name] = 'open'
-                    print(f"✅ {name} door opened successfully - State: {door_states[name]}")
+                    print(f" {name} door opened successfully - State: {door_states[name]}")
                     return {'status': 'success', 'door': name, 'action': 'opened', 'state': door_states[name]}
                 else:
-                    print(f"❌ Failed to open {name} door")
+                    print(f" Failed to open {name} door")
                     api.abort(500, 'Failed to open door')
             else:
                 api.abort(404, 'Unknown door')
@@ -838,13 +874,13 @@ class DoorControl(Resource):
                     api.abort(500, f'Error closing console door: {str(e)}')
             elif name in door_states:
                 closed_angle = servo_config[name]['closed_angle']
-                print(f"🔒 Closing {name} door to {closed_angle}°")
+                print(f" Closing {name} door to {closed_angle}°")
                 if set_servo_angle(name, closed_angle):
                     door_states[name] = 'closed'
-                    print(f"✅ {name} door closed successfully - State: {door_states[name]}")
+                    print(f" {name} door closed successfully - State: {door_states[name]}")
                     return {'status': 'success', 'door': name, 'action': 'closed', 'state': door_states[name]}
                 else:
-                    print(f"❌ Failed to close {name} door")
+                    print(f" Failed to close {name} door")
                     api.abort(500, 'Failed to close door')
             else:
                 api.abort(404, 'Unknown door')
@@ -860,34 +896,34 @@ class DoorControl(Resource):
                     logger.error(f"Exception in toggle_console_door: {e}", exc_info=True)
                     api.abort(500, f'Error toggling console door: {str(e)}')
             elif name in door_states:
-                print(f"🔄 Toggling {name} door - Current state: {door_states[name]}")
+                print(f" Toggling {name} door - Current state: {door_states[name]}")
                 if door_states[name] == 'closed':
                     open_angle = servo_config[name]['open_angle']
                     print(f"Door is closed, opening to {open_angle}°...")
                     if set_servo_angle(name, open_angle):
                         door_states[name] = 'open'
-                        print(f"✅ {name} door toggled to open - State: {door_states[name]}")
+                        print(f" {name} door toggled to open - State: {door_states[name]}")
                         return {'status': 'success', 'door': name, 'action': 'toggled to open', 'state': door_states[name]}
                 else:
                     closed_angle = servo_config[name]['closed_angle']
                     print(f"Door is open, closing to {closed_angle}°...")
                     if set_servo_angle(name, closed_angle):
                         door_states[name] = 'closed'
-                        print(f"✅ {name} door toggled to closed - State: {door_states[name]}")
+                        print(f" {name} door toggled to closed - State: {door_states[name]}")
                         return {'status': 'success', 'door': name, 'action': 'toggled to closed', 'state': door_states[name]}
             else:
                 api.abort(404, 'Unknown door')
         elif action == 'angle':
             angle = args['angle']
             if angle is None or not (0 <= angle <= 180):
-                print(f"❌ Invalid or missing angle: {angle}")
+                print(f" Invalid or missing angle: {angle}")
                 api.abort(400, 'Invalid or missing angle (0-180)')
-            print(f"📏 Setting {name} door to custom angle: {angle}°")
+            print(f" Setting {name} door to custom angle: {angle}°")
             if set_servo_angle(name, angle):
-                print(f"✅ {name} door set to {angle}° successfully")
+                print(f" {name} door set to {angle}° successfully")
                 return {'status': 'success', 'door': name, 'angle': angle, 'state': door_states[name]}
             else:
-                print(f"❌ Failed to set {name} door to angle {angle}°")
+                print(f" Failed to set {name} door to angle {angle}°")
                 api.abort(404, 'Unknown door')
 
 @ns_ir.route('/learn')
@@ -911,7 +947,7 @@ class IRLearn(Resource):
         ir_learning_start_time = time.time()
         
         logger.info("IR learning mode activated")
-        print("🔴 IR learning mode activated - waiting for signal...")
+        print(" IR learning mode activated - waiting for signal...")
         
         return {
             'status': 'learning_started',
@@ -1017,28 +1053,28 @@ class ServoTest(Resource):
         
         success = False  # Initialize success variable
         
-        print(f"\n🧪 Testing servo: {name} - Test type: {test_type}")
+        print(f"\n Testing servo: {name} - Test type: {test_type}")
         
         if test_type == 'sweep':
             start = args['start_angle'] if args['start_angle'] is not None else config['min_angle']
             end = args['end_angle'] if args['end_angle'] is not None else config['max_angle']
-            print(f"📊 Sweep parameters: start={start}°, end={end}°, step={args['step']}, delay={args['delay']}s")
+            print(f" Sweep parameters: start={start}°, end={end}°, step={args['step']}, delay={args['delay']}s")
             success = test_servo_sweep(name, start, end, args['step'], args['delay'])
         elif test_type == 'center':
-            print(f"📍 Setting {name} to center position: {config['center_angle']}°")
+            print(f" Setting {name} to center position: {config['center_angle']}°")
             success = set_servo_angle(name, config['center_angle'])
         elif test_type == 'min':
-            print(f"📉 Setting {name} to minimum position: {config['min_angle']}°")
+            print(f" Setting {name} to minimum position: {config['min_angle']}°")
             success = set_servo_angle(name, config['min_angle'])
         elif test_type == 'max':
-            print(f"📈 Setting {name} to maximum position: {config['max_angle']}°")
+            print(f" Setting {name} to maximum position: {config['max_angle']}°")
             success = set_servo_angle(name, config['max_angle'])
         
         if success:
-            print(f"✅ Test completed successfully for {name}\n")
+            print(f" Test completed successfully for {name}\n")
             return {'status': 'success', 'servo': name, 'test_type': test_type}
         else:
-            print(f"❌ Test failed for {name}\n")
+            print(f" Test failed for {name}\n")
             api.abort(400, 'Test failed')
 
 @ns_servo.route('/test-all')
@@ -1055,30 +1091,30 @@ class ServoTestAll(Resource):
         test_type = args['test_type']
         results = []
         
-        print(f"\n🧪 Testing ALL servos - Test type: {test_type}")
+        print(f"\n Testing ALL servos - Test type: {test_type}")
         
         for servo_name in servo_config.keys():
             config = servo_config[servo_name]
             
-            print(f"\n▶️ Testing {servo_name} ({config['description']})...")
+            print(f"\n Testing {servo_name} ({config['description']})...")
             
             if test_type == 'sweep':
-                print(f"📊 Quick sweep from {config['min_angle']}° to {config['max_angle']}°")
+                print(f" Quick sweep from {config['min_angle']}° to {config['max_angle']}°")
                 success = test_servo_sweep(servo_name, delay=0.2)  # Faster for all servos
             elif test_type == 'center':
-                print(f"📍 Setting to center position: {config['center_angle']}°")
+                print(f" Setting to center position: {config['center_angle']}°")
                 success = set_servo_angle(servo_name, config['center_angle'])
             elif test_type == 'min':
-                print(f"📉 Setting to minimum position: {config['min_angle']}°")
+                print(f" Setting to minimum position: {config['min_angle']}°")
                 success = set_servo_angle(servo_name, config['min_angle'])
             elif test_type == 'max':
-                print(f"📈 Setting to maximum position: {config['max_angle']}°")
+                print(f" Setting to maximum position: {config['max_angle']}°")
                 success = set_servo_angle(servo_name, config['max_angle'])
             
             results.append(f"{servo_name}: {'success' if success else 'failed'}")
             time.sleep(0.1)  # Small delay between servos
         
-        print(f"\n✅ All servo tests completed - Results: {', '.join(results)}\n")
+        print(f"\n All servo tests completed - Results: {', '.join(results)}\n")
         return {'status': 'completed', 'servo': 'all', 'test_type': test_type, 'results': results}
 
 @ns_system.route('/status')
@@ -1142,7 +1178,7 @@ class BatteryDoorControl(Resource):
         
         action = args['action']
         logger.info(f"Battery door API called: action={action}")
-        print(f"\n🔋 Battery Door API - Action: {action}")
+        print(f"\n Battery Door API - Action: {action}")
         
         if action == 'open':
             result = open_battery_doors()
@@ -1181,23 +1217,23 @@ def red_toggle_sequence():
     global red_toggle_active, orange_flash_thread, orange_flash_stop_event
     
     logger.info("Red toggle switch activated - starting sequence with screen ON")
-    print("\n🔴 RED TOGGLE SWITCH ACTIVATED!")
-    print("📺 Turning screen ON...")
+    print("\n RED TOGGLE SWITCH ACTIVATED!")
+    print(" Turning screen ON...")
     
     # Call screen ON API first
     try:
         response = requests.post('http://localhost:3000/api/screen/on', timeout=5)
         if response.status_code == 200:
             logger.info("Screen turned ON successfully")
-            print("✅ Screen turned ON")
+            print(" Screen turned ON")
         else:
             logger.warning(f"Screen ON API returned status {response.status_code}")
-            print(f"⚠️ Screen ON API returned status {response.status_code}")
+            print(f" Screen ON API returned status {response.status_code}")
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to call screen ON API: {e}")
-        print(f"❌ Failed to turn screen ON: {e}")
+        print(f" Failed to turn screen ON: {e}")
     
-    print("🚨 Activating all lamps and LEDs for 10 seconds...")
+    print(" Activating all lamps and LEDs for 10 seconds...")
     
     red_toggle_active = True
     
@@ -1208,11 +1244,11 @@ def red_toggle_sequence():
         startup_led.on()
         malfunction_led1.on()
         logger.info("All lamps and LEDs activated")
-        print("✅ All lamps and LEDs ON")
+        print(" All lamps and LEDs ON")
         
         # Keep them on for 10 seconds
         logger.info("Waiting 10 seconds...")
-        print("⏱️ Waiting 10 seconds...")
+        print(" Waiting 10 seconds...")
         time.sleep(10)
         
         # Turn off all except orange lamp
@@ -1222,15 +1258,15 @@ def red_toggle_sequence():
         orange_lamp.off()  # Turn off before starting flash
         
         logger.info("10-second sequence complete - starting orange lamp flash")
-        print("✅ 10-second sequence complete")
-        print("🟠 Starting orange lamp flash (1 second on/off cycle)")
+        print(" 10-second sequence complete")
+        print(" Starting orange lamp flash (1 second on/off cycle)")
         
         # Start orange lamp flashing thread
         start_orange_flash()
         
     except Exception as e:
         logger.error(f"Error in red toggle sequence: {e}")
-        print(f"❌ Error in red toggle sequence: {e}")
+        print(f" Error in red toggle sequence: {e}")
         red_toggle_active = False
 
 def start_orange_flash():
@@ -1280,15 +1316,15 @@ def stop_orange_flash():
         orange_flash_thread.join(timeout=2.0)
         orange_flash_thread = None
         orange_lamp.off()
-        print("🟠 Orange lamp flashing stopped")
+        print(" Orange lamp flashing stopped")
 
 def red_toggle_off():
     """Handle red toggle switch being turned off"""
     global red_toggle_active
     
     logger.info("Red toggle switch deactivated - starting shutdown sequence")
-    print("\n🔴 RED TOGGLE SWITCH DEACTIVATED")
-    print("🚨 Starting shutdown sequence...")
+    print("\n RED TOGGLE SWITCH DEACTIVATED")
+    print(" Starting shutdown sequence...")
     
     red_toggle_active = False
     
@@ -1302,31 +1338,31 @@ def red_toggle_off():
         startup_led.off()
         malfunction_led1.off()
         logger.info("All lamps and LEDs turned off")
-        print("✅ All lamps and LEDs OFF")
+        print(" All lamps and LEDs OFF")
         
         # Wait 3 seconds before closing console door
         logger.info("Waiting 3 seconds before closing console door...")
-        print("⏱️ Waiting 3 seconds before closing console door...")
+        print(" Waiting 3 seconds before closing console door...")
         time.sleep(3)
         
         # Close the console door
         logger.info("Closing console door")
-        print("🚪 Closing console door...")
+        print(" Closing console door...")
         result = close_console_door()
         
         if result:
             logger.info("Console door closed successfully via toggle switch")
-            print("✅ Console door closed successfully")
+            print(" Console door closed successfully")
         else:
             logger.error("Failed to close console door via toggle switch")
-            print("❌ Failed to close console door")
+            print(" Failed to close console door")
             
         logger.info("Red toggle switch shutdown sequence complete")
-        print("✅ Shutdown sequence complete")
+        print(" Shutdown sequence complete")
         
     except Exception as e:
         logger.error(f"Error in red toggle shutdown sequence: {e}")
-        print(f"❌ Error in shutdown sequence: {e}")
+        print(f" Error in shutdown sequence: {e}")
 
 # IR door operation function
 def ir_door_operation():
@@ -1336,68 +1372,68 @@ def ir_door_operation():
         current_state = door_states['console_door']
         if current_state == 'closed':
             logger.info("IR triggered - opening console door")
-            print("� IR triggered - opening console door")
+            print(" IR triggered - opening console door")
             open_console_door()
         elif current_state == 'open':
             logger.info("IR triggered - closing console door")
-            print("� IR triggered - closing console door")
+            print(" IR triggered - closing console door")
             close_console_door()
         else:
             logger.info(f"IR triggered - current state: {current_state}")
-            print(f"🚪 IR triggered - current state: {current_state}")
+            print(f" IR triggered - current state: {current_state}")
     except Exception as e:
         logger.error(f"Error in IR door operation: {e}")
-        print(f"❌ Error in IR door operation: {e}")
+        print(f" Error in IR door operation: {e}")
 
 # Functions to control console door
 def open_console_door():
     global door_states
     logger.info("Opening console door")
-    print("\n🔓 Opening console door...")
+    print("\n Opening console door...")
     
     # Use the configured open angle from servo_config
     open_angle = servo_config['console_door']['open_angle']
     logger.debug(f"Console door open angle from config: {open_angle}°")
-    print(f"📍 Setting console_door to open position: {open_angle}°")
+    print(f" Setting console_door to open position: {open_angle}°")
     
     success = set_servo_angle('console_door', open_angle)
     
     if success:
         door_states['console_door'] = 'open'
         logger.info(f"Console door opened successfully. State set to: {door_states['console_door']}")
-        print(f"✅ Door opened successfully - Current state: {door_states['console_door']}\n")
+        print(f" Door opened successfully - Current state: {door_states['console_door']}\n")
     else:
         logger.error("Failed to open console door")
-        print(f"❌ Failed to open door\n")
+        print(f" Failed to open door\n")
     
     return success
 
 def close_console_door():
     global door_states
     logger.info("Closing console door")
-    print("\n🔒 Closing console door...")
+    print("\n Closing console door...")
     
     # Use the configured closed angle from servo_config
     closed_angle = servo_config['console_door']['closed_angle']
     logger.debug(f"Console door closed angle from config: {closed_angle}°")
-    print(f"📍 Setting console_door to closed position: {closed_angle}°")
+    print(f" Setting console_door to closed position: {closed_angle}°")
     
     success = set_servo_angle('console_door', closed_angle)
     
     if success:
         door_states['console_door'] = 'closed'
         logger.info(f"Console door closed successfully. State set to: {door_states['console_door']}")
-        print(f"✅ Door closed successfully - Current state: {door_states['console_door']}\n")
+        print(f" Door closed successfully - Current state: {door_states['console_door']}\n")
     else:
         logger.error("Failed to close console door")
-        print(f"❌ Failed to close door\n")
+        print(f" Failed to close door\n")
     
     return success
 
 def toggle_console_door():
     global door_states
     logger.info(f"Toggling console door. Current state: {door_states['console_door']}")
-    print(f"\n🔄 Toggling console door - Current state: {door_states['console_door']}")
+    print(f"\n Toggling console door - Current state: {door_states['console_door']}")
     
     if door_states['console_door'] == 'closed':
         logger.debug("Door is closed, opening it")
@@ -1412,14 +1448,14 @@ def toggle_console_door():
 def open_battery_doors():
     global door_states
     logger.info("Opening battery doors simultaneously (right door finishes 0.1s after left)")
-    print("\n🔋 Opening battery doors simultaneously...")
+    print("\n Opening battery doors simultaneously...")
     
     # Get configured open angles for both doors
     left_open_angle = servo_config['left_door']['open_angle']
     right_open_angle = servo_config['right_door']['open_angle']
     
     logger.debug(f"Left door open angle: {left_open_angle}°, Right door open angle: {right_open_angle}°")
-    print(f"📍 Opening both doors simultaneously - left to {left_open_angle}°, right to {right_open_angle}° (right finishes 0.1s later)")
+    print(f" Opening both doors simultaneously - left to {left_open_angle}°, right to {right_open_angle}° (right finishes 0.1s later)")
     
     # Start both doors simultaneously using threads
     import threading
@@ -1428,13 +1464,13 @@ def open_battery_doors():
     right_success = [False]
     
     def open_left():
-        print("🔓 Opening left door...")
+        print(" Opening left door...")
         left_success[0] = set_servo_angle('left_door', left_open_angle)
     
     def open_right():
         # Small delay so right door finishes 0.1s after left
         time.sleep(0.1)
-        print("🔓 Opening right door (0.1s later)...")
+        print(" Opening right door (0.1s later)...")
         right_success[0] = set_servo_angle('right_door', right_open_angle)
     
     # Start both threads simultaneously
@@ -1452,40 +1488,40 @@ def open_battery_doors():
     if left_success[0]:
         door_states['left_door'] = 'open'
         logger.info("Left battery door opened successfully")
-        print("✅ Left battery door opened successfully")
+        print(" Left battery door opened successfully")
     else:
         logger.error("Failed to open left battery door")
-        print("❌ Failed to open left battery door")
+        print(" Failed to open left battery door")
     
     if right_success[0]:
         door_states['right_door'] = 'open'
         logger.info("Right battery door opened successfully")
-        print("✅ Right battery door opened successfully")
+        print(" Right battery door opened successfully")
     else:
         logger.error("Failed to open right battery door")
-        print("❌ Failed to open right battery door")
+        print(" Failed to open right battery door")
     
     overall_success = left_success[0] and right_success[0]
     if overall_success:
         logger.info("Both battery doors opened successfully with simultaneous timing")
-        print("✅ Both battery doors opened successfully with simultaneous timing\n")
+        print(" Both battery doors opened successfully with simultaneous timing\n")
     else:
         logger.warning("One or both battery doors failed to open")
-        print("⚠️ One or both battery doors failed to open\n")
+        print(" One or both battery doors failed to open\n")
     
     return overall_success
 
 def close_battery_doors():
     global door_states
     logger.info("Closing battery doors simultaneously (right door finishes 0.1s after left)")
-    print("\n🔋 Closing battery doors simultaneously...")
+    print("\n Closing battery doors simultaneously...")
     
     # Get configured closed angles for both doors
     left_closed_angle = servo_config['left_door']['closed_angle']
     right_closed_angle = servo_config['right_door']['closed_angle']
     
     logger.debug(f"Left door closed angle: {left_closed_angle}°, Right door closed angle: {right_closed_angle}°")
-    print(f"📍 Closing both doors simultaneously - left to {left_closed_angle}°, right to {right_closed_angle}° (right finishes 0.1s later)")
+    print(f" Closing both doors simultaneously - left to {left_closed_angle}°, right to {right_closed_angle}° (right finishes 0.1s later)")
     
     # Start both doors simultaneously using threads
     import threading
@@ -1494,13 +1530,13 @@ def close_battery_doors():
     right_success = [False]
     
     def close_left():
-        print("🔒 Closing left door...")
+        print(" Closing left door...")
         left_success[0] = set_servo_angle('left_door', left_closed_angle)
     
     def close_right():
         # Small delay so right door finishes 0.1s after left
         time.sleep(0.1)
-        print("🔒 Closing right door (0.1s later)...")
+        print(" Closing right door (0.1s later)...")
         right_success[0] = set_servo_angle('right_door', right_closed_angle)
     
     # Start both threads simultaneously
@@ -1518,33 +1554,33 @@ def close_battery_doors():
     if left_success[0]:
         door_states['left_door'] = 'closed'
         logger.info("Left battery door closed successfully")
-        print("✅ Left battery door closed successfully")
+        print(" Left battery door closed successfully")
     else:
         logger.error("Failed to close left battery door")
-        print("❌ Failed to close left battery door")
+        print(" Failed to close left battery door")
     
     if right_success[0]:
         door_states['right_door'] = 'closed'
         logger.info("Right battery door closed successfully")
-        print("✅ Right battery door closed successfully")
+        print(" Right battery door closed successfully")
     else:
         logger.error("Failed to close right battery door")
-        print("❌ Failed to close right battery door")
+        print(" Failed to close right battery door")
     
     overall_success = left_success[0] and right_success[0]
     if overall_success:
         logger.info("Both battery doors closed successfully with simultaneous timing")
-        print("✅ Both battery doors closed successfully with simultaneous timing\n")
+        print(" Both battery doors closed successfully with simultaneous timing\n")
     else:
         logger.warning("One or both battery doors failed to close")
-        print("⚠️ One or both battery doors failed to close\n")
+        print(" One or both battery doors failed to close\n")
     
     return overall_success
 
 def toggle_battery_doors():
     global door_states
     logger.info(f"Toggling battery doors. Left: {door_states['left_door']}, Right: {door_states['right_door']}")
-    print(f"\n🔄 Toggling battery doors - Left: {door_states['left_door']}, Right: {door_states['right_door']}")
+    print(f"\n Toggling battery doors - Left: {door_states['left_door']}, Right: {door_states['right_door']}")
     
     # If either door is closed, open both. If both are open, close both.
     if door_states['left_door'] == 'closed' or door_states['right_door'] == 'closed':
@@ -1567,7 +1603,7 @@ def input_monitor():
             global door_states, last_ir_time, ir_learning_mode, ir_learning_start_time, learned_ir_signal, ir_pulse_times
             current_time = time.time()
             
-            print(f"🔴 IR signal received at {current_time}")
+            print(f" IR signal received at {current_time}")
             logger.info(f"IR signal received at {current_time}")
             
             # Add pulse time for pattern recognition
@@ -1579,7 +1615,7 @@ def input_monitor():
                 if current_time - ir_learning_start_time > ir_learning_timeout:
                     ir_learning_mode = False
                     logger.info("IR learning mode timed out")
-                    print("🔴 IR learning mode timed out")
+                    print(" IR learning mode timed out")
                     ir_pulse_times = []  # Clear pattern data
                     return
                 
@@ -1596,7 +1632,7 @@ def input_monitor():
                         ir_learning_mode = False
                         
                         logger.info(f"IR signal learned successfully with pattern: {pattern}")
-                        print("✅ IR signal learned successfully! Signal will now control console door.")
+                        print(" IR signal learned successfully! Signal will now control console door.")
                         
                         # Save to persistent storage
                         save_learned_ir_signal(learned_ir_signal)
@@ -1608,14 +1644,14 @@ def input_monitor():
             # Not in learning mode - check if we have a learned signal
             if not learned_ir_signal:
                 logger.debug("No learned IR signal - ignoring")
-                print("🔴 No learned signal - use learning mode first")
+                print(" IR learning mode not active - ignoring")
                 ir_pulse_times = []  # Clear pattern data
                 return
             
             # Debouncing check
             if current_time - last_ir_time < ir_debounce_delay:
                 logger.debug(f"IR signal ignored - debounce active")
-                print(f"🔴 IR signal ignored - debounce active")
+                print(f" IR signal ignored - debounce active")
                 return
             
             # Check if pattern is complete (no new pulses for pattern_timeout)
@@ -1628,7 +1664,7 @@ def input_monitor():
                     
                     if patterns_match(current_pattern, learned_pattern, ir_pattern_tolerance):
                         logger.info("IR pattern matches learned signal - executing door operation")
-                        print("✅ IR pattern matches - executing door operation")
+                        print(" IR pattern matches - executing door operation")
                         
                         # Execute door operation
                         last_ir_time = current_time
@@ -1636,7 +1672,7 @@ def input_monitor():
                         ir_thread.start()
                     else:
                         logger.debug(f"IR pattern mismatch - Current: {current_pattern}, Learned: {learned_pattern}")
-                        print("🔴 IR pattern doesn't match learned signal - ignoring")
+                        print(" IR pattern doesn't match learned signal - ignoring")
                 
                 return
             
@@ -1645,54 +1681,74 @@ def input_monitor():
         # Attach the callback to the IR receiver
         ir_receiver.when_pressed = ir_signal_received
         logger.info("IR receiver callback attached")
-        print("🔴 IR receiver callback attached - ready to receive signals")
+        print(" IR receiver callback attached - ready to receive signals")
     
     # Set up RC controller input callbacks
-    if rc_console_door is not None:
-        def rc_console_door_pressed():
-            current_time = time.time()
-            logger.info(f"🎮 RC CONSOLE DOOR PRESSED at {current_time}")
-            print(f"🎮 RC CONSOLE DOOR PRESSED at {current_time}")
-            try:
-                # Run the door operation in a separate thread to avoid blocking
-                door_thread = Thread(target=toggle_console_door, daemon=True)
-                door_thread.start()
-            except Exception as e:
-                logger.error(f"Error starting RC console door operation: {e}")
-                print(f"❌ Error starting RC console door operation: {e}")
+    if PIGPIO_AVAILABLE and rc_pi and rc_pi.connected:
+        def rc_console_door_callback(gpio, level, tick):
+            global rc_console_door_pulse, rc_console_door_last_trigger, rc_console_door_start_tick
+            
+            if level == 1:  # Rising edge - start of pulse
+                rc_console_door_start_tick = tick
+            elif level == 0:  # Falling edge - end of pulse
+                if rc_console_door_start_tick > 0:
+                    pulse_width = pigpio.tickDiff(rc_console_door_start_tick, tick)
+                    rc_console_door_pulse = pulse_width
+                    
+                    current_time = time.time()
+                    
+                    # Log pulse width for debugging
+                    if pulse_width > 900 and pulse_width < 2100:  # Valid RC pulse range
+                        logger.debug(f"RC GPIO 14 pulse: {pulse_width}us")
+                    
+                    if pulse_width > rc_trigger_threshold and current_time - rc_console_door_last_trigger > rc_debounce_delay:
+                        logger.info(f" RC console door triggered - pulse: {pulse_width}us")
+                        print(f" RC CONSOLE DOOR TRIGGERED - pulse: {pulse_width}us")
+                        rc_console_door_last_trigger = current_time
+                        
+                        # Run the door operation in a separate thread to avoid blocking
+                        try:
+                            door_thread = Thread(target=toggle_console_door, daemon=True)
+                            door_thread.start()
+                        except Exception as e:
+                            logger.error(f"Error starting RC console door operation: {e}")
+                            print(f" Error: {e}")
         
-        def rc_console_door_released():
-            current_time = time.time()
-            logger.info(f"🎮 RC CONSOLE DOOR RELEASED at {current_time}")
-            print(f"🎮 RC CONSOLE DOOR RELEASED at {current_time}")
+        def rc_battery_doors_callback(gpio, level, tick):
+            global rc_battery_doors_pulse, rc_battery_doors_last_trigger, rc_battery_doors_start_tick
+            
+            if level == 1:  # Rising edge - start of pulse
+                rc_battery_doors_start_tick = tick
+            elif level == 0:  # Falling edge - end of pulse
+                if rc_battery_doors_start_tick > 0:
+                    pulse_width = pigpio.tickDiff(rc_battery_doors_start_tick, tick)
+                    rc_battery_doors_pulse = pulse_width
+                    
+                    current_time = time.time()
+                    
+                    # Log pulse width for debugging
+                    if pulse_width > 900 and pulse_width < 2100:  # Valid RC pulse range
+                        logger.debug(f"RC GPIO 15 pulse: {pulse_width}us")
+                    
+                    if pulse_width > rc_trigger_threshold and current_time - rc_battery_doors_last_trigger > rc_debounce_delay:
+                        logger.info(f" RC battery doors triggered - pulse: {pulse_width}us")
+                        print(f" RC BATTERY DOORS TRIGGERED - pulse: {pulse_width}us")
+                        rc_battery_doors_last_trigger = current_time
+                        
+                        # Run the door operation in a separate thread to avoid blocking
+                        try:
+                            door_thread = Thread(target=toggle_battery_doors, daemon=True)
+                            door_thread.start()
+                        except Exception as e:
+                            logger.error(f"Error starting RC battery doors operation: {e}")
+                            print(f" Error: {e}")
         
-        rc_console_door.when_pressed = rc_console_door_pressed
-        rc_console_door.when_released = rc_console_door_released
-        logger.info("RC console door callback attached (GPIO 14)")
-        print("🎮 RC console door callback attached (GPIO 14) - monitoring for signals")
-    
-    if rc_battery_doors is not None:
-        def rc_battery_doors_pressed():
-            current_time = time.time()
-            logger.info(f"🎮 RC BATTERY DOORS PRESSED at {current_time}")
-            print(f"🎮 RC BATTERY DOORS PRESSED at {current_time}")
-            try:
-                # Run the door operation in a separate thread to avoid blocking
-                door_thread = Thread(target=toggle_battery_doors, daemon=True)
-                door_thread.start()
-            except Exception as e:
-                logger.error(f"Error starting RC battery doors operation: {e}")
-                print(f"❌ Error starting RC battery doors operation: {e}")
-        
-        def rc_battery_doors_released():
-            current_time = time.time()
-            logger.info(f"🎮 RC BATTERY DOORS RELEASED at {current_time}")
-            print(f"🎮 RC BATTERY DOORS RELEASED at {current_time}")
-        
-        rc_battery_doors.when_pressed = rc_battery_doors_pressed
-        rc_battery_doors.when_released = rc_battery_doors_released
-        logger.info("RC battery doors callback attached (GPIO 15)")
-        print("🎮 RC battery doors callback attached (GPIO 15) - monitoring for signals")
+        # Attach callbacks for both rising and falling edges
+        rc_pi.callback(14, pigpio.EITHER_EDGE, rc_console_door_callback)
+        rc_pi.callback(15, pigpio.EITHER_EDGE, rc_battery_doors_callback)
+        logger.info("RC controller PWM callbacks attached (GPIO 14, 15)")
+        print(" RC controller ready - FrSky PWM decoding active")
+        print(f"   Trigger threshold: {rc_trigger_threshold}us (push stick past this)")
     
     # Set up red toggle switch callbacks
     if red_toggle_switch is not None:
@@ -1703,19 +1759,19 @@ def input_monitor():
             # Debouncing: ignore rapid toggle events
             if current_time - last_toggle_time < toggle_debounce_delay:
                 logger.debug(f"Red toggle PRESSED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
-                print(f"🔴 Red toggle PRESSED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
+                print(f" Red toggle PRESSED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
                 return
             
             last_toggle_time = current_time
             logger.info("Red toggle switch pressed (activated)")
-            print("🔴 Red toggle switch PRESSED - starting sequence")
+            print(" Red toggle switch PRESSED - starting sequence")
             try:
                 # Run the sequence in a separate thread to avoid blocking
                 toggle_thread = Thread(target=red_toggle_sequence, daemon=True)
                 toggle_thread.start()
             except Exception as e:
                 logger.error(f"Error starting red toggle sequence: {e}")
-                print(f"❌ Error starting red toggle sequence: {e}")
+                print(f" Error starting red toggle sequence: {e}")
         
         def red_toggle_released():
             global last_toggle_time
@@ -1724,25 +1780,25 @@ def input_monitor():
             # Debouncing: ignore rapid toggle events
             if current_time - last_toggle_time < toggle_debounce_delay:
                 logger.debug(f"Red toggle RELEASED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
-                print(f"🔴 Red toggle RELEASED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
+                print(f" Red toggle RELEASED ignored - debounce active ({current_time - last_toggle_time:.2f}s since last)")
                 return
             
             last_toggle_time = current_time
             logger.info("Red toggle switch released (deactivated)")
-            print("🔴 Red toggle switch RELEASED - starting shutdown sequence")
+            print(" Red toggle switch RELEASED - starting shutdown sequence")
             try:
                 # Run the shutdown sequence in a separate thread to avoid blocking
                 shutdown_thread = Thread(target=red_toggle_off, daemon=True)
                 shutdown_thread.start()
             except Exception as e:
                 logger.error(f"Error starting red toggle shutdown sequence: {e}")
-                print(f"❌ Error starting red toggle shutdown sequence: {e}")
+                print(f" Error starting red toggle shutdown sequence: {e}")
         
         # Attach the callbacks to the red toggle switch
         red_toggle_switch.when_pressed = red_toggle_pressed
         red_toggle_switch.when_released = red_toggle_released
         logger.info("Red toggle switch callbacks attached")
-        print("🔴 Red toggle switch callbacks attached - ready for activation")
+        print(" Red toggle switch callbacks attached - ready for activation")
     
     try:
         while True:
