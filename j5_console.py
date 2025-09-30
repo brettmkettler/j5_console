@@ -1647,6 +1647,53 @@ def input_monitor():
         logger.info("IR receiver callback attached")
         print("🔴 IR receiver callback attached - ready to receive signals")
     
+    # Set up RC controller input callbacks
+    if rc_console_door is not None:
+        def rc_console_door_pressed():
+            current_time = time.time()
+            logger.info(f"🎮 RC CONSOLE DOOR PRESSED at {current_time}")
+            print(f"🎮 RC CONSOLE DOOR PRESSED at {current_time}")
+            try:
+                # Run the door operation in a separate thread to avoid blocking
+                door_thread = Thread(target=toggle_console_door, daemon=True)
+                door_thread.start()
+            except Exception as e:
+                logger.error(f"Error starting RC console door operation: {e}")
+                print(f"❌ Error starting RC console door operation: {e}")
+        
+        def rc_console_door_released():
+            current_time = time.time()
+            logger.info(f"🎮 RC CONSOLE DOOR RELEASED at {current_time}")
+            print(f"🎮 RC CONSOLE DOOR RELEASED at {current_time}")
+        
+        rc_console_door.when_pressed = rc_console_door_pressed
+        rc_console_door.when_released = rc_console_door_released
+        logger.info("RC console door callback attached (GPIO 14)")
+        print("🎮 RC console door callback attached (GPIO 14) - monitoring for signals")
+    
+    if rc_battery_doors is not None:
+        def rc_battery_doors_pressed():
+            current_time = time.time()
+            logger.info(f"🎮 RC BATTERY DOORS PRESSED at {current_time}")
+            print(f"🎮 RC BATTERY DOORS PRESSED at {current_time}")
+            try:
+                # Run the door operation in a separate thread to avoid blocking
+                door_thread = Thread(target=toggle_battery_doors, daemon=True)
+                door_thread.start()
+            except Exception as e:
+                logger.error(f"Error starting RC battery doors operation: {e}")
+                print(f"❌ Error starting RC battery doors operation: {e}")
+        
+        def rc_battery_doors_released():
+            current_time = time.time()
+            logger.info(f"🎮 RC BATTERY DOORS RELEASED at {current_time}")
+            print(f"🎮 RC BATTERY DOORS RELEASED at {current_time}")
+        
+        rc_battery_doors.when_pressed = rc_battery_doors_pressed
+        rc_battery_doors.when_released = rc_battery_doors_released
+        logger.info("RC battery doors callback attached (GPIO 15)")
+        print("🎮 RC battery doors callback attached (GPIO 15) - monitoring for signals")
+    
     # Set up red toggle switch callbacks
     if red_toggle_switch is not None:
         def red_toggle_pressed():
@@ -1696,39 +1743,6 @@ def input_monitor():
         red_toggle_switch.when_released = red_toggle_released
         logger.info("Red toggle switch callbacks attached")
         print("🔴 Red toggle switch callbacks attached - ready for activation")
-    
-    # Set up RC controller input callbacks
-    if rc_console_door is not None:
-        def rc_console_door_pressed():
-            logger.info("RC console door button pressed")
-            print("🔴 RC console door button pressed")
-            try:
-                # Run the door operation in a separate thread to avoid blocking
-                door_thread = Thread(target=toggle_console_door, daemon=True)
-                door_thread.start()
-            except Exception as e:
-                logger.error(f"Error starting RC console door operation: {e}")
-                print(f"❌ Error starting RC console door operation: {e}")
-        
-        rc_console_door.when_pressed = rc_console_door_pressed
-        logger.info("RC console door callback attached")
-        print("🔴 RC console door callback attached - ready for activation")
-    
-    if rc_battery_doors is not None:
-        def rc_battery_doors_pressed():
-            logger.info("RC battery doors button pressed")
-            print("🔴 RC battery doors button pressed")
-            try:
-                # Run the door operation in a separate thread to avoid blocking
-                door_thread = Thread(target=toggle_battery_doors, daemon=True)
-                door_thread.start()
-            except Exception as e:
-                logger.error(f"Error starting RC battery doors operation: {e}")
-                print(f"❌ Error starting RC battery doors operation: {e}")
-        
-        rc_battery_doors.when_pressed = rc_battery_doors_pressed
-        logger.info("RC battery doors callback attached")
-        print("🔴 RC battery doors callback attached - ready for activation")
     
     try:
         while True:
