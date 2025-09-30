@@ -227,6 +227,10 @@ door_states = {
     'right_door': 'closed'
 }
 
+# Event objects for controlling LED threads
+blink_stop_event = Event()
+malfunction_stop_event = Event()
+
 # Red toggle switch state
 red_toggle_active = False
 orange_flash_thread = None
