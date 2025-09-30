@@ -13,15 +13,6 @@ import subprocess
 import logging
 import requests
 from gpiozero.exc import GPIOPinInUse, GPIODeviceClosed
-import pigpio
-
-# Try to import pigpio for RC PWM decoding
-try:
-    PIGPIO_AVAILABLE = True
-except ImportError:
-    PIGPIO_AVAILABLE = False
-    print("Warning: pigpio not available - RC controller will not work")
-    print("Install with: sudo apt-get install pigpio python3-pigpio")
 
 # Configure logging
 logging.basicConfig(
@@ -114,29 +105,13 @@ right_door.value = None  # Disable PWM on startup - servo stays in current posit
 logger.info(f"Successfully initialized right_door servo on GPIO 19: {right_door}")
 
 # Initialize RC controller inputs for door control
-logger.info("Initializing RC controller input on GPIO 14 for console door control")
-if PIGPIO_AVAILABLE:
-    rc_pi = pigpio.pi()
-    if rc_pi.connected:
-        rc_pi.set_mode(14, pigpio.INPUT)
-        rc_pi.set_pull_up_down(14, pigpio.PUD_DOWN)
-        logger.info("Successfully initialized RC console door input on GPIO 14 using pigpio")
-    else:
-        logger.error("Failed to connect to pigpio daemon - RC controller will not work")
-        print("ERROR: pigpio daemon not running. Start with: sudo pigpiod")
-        PIGPIO_AVAILABLE = False
-else:
-    rc_console_door = Button(14, pull_up=True, pin_factory=pin_factory)
-    logger.info(f"Successfully initialized RC console door input on GPIO 14: {rc_console_door}")
+logger.info("Initializing RC relay input on GPIO 14 for console door control")
+rc_console_door = Button(14, pull_up=True, pin_factory=pin_factory)
+logger.info(f"Successfully initialized RC console door relay on GPIO 14: {rc_console_door}")
 
-logger.info("Initializing RC controller input on GPIO 15 for battery doors control")
-if PIGPIO_AVAILABLE and rc_pi and rc_pi.connected:
-    rc_pi.set_mode(15, pigpio.INPUT)
-    rc_pi.set_pull_up_down(15, pigpio.PUD_DOWN)
-    logger.info("Successfully initialized RC battery doors input on GPIO 15 using pigpio")
-else:
-    rc_battery_doors = Button(15, pull_up=True, pin_factory=pin_factory)
-    logger.info(f"Successfully initialized RC battery doors input on GPIO 15: {rc_battery_doors}")
+logger.info("Initializing RC relay input on GPIO 15 for battery doors control")
+rc_battery_doors = Button(15, pull_up=True, pin_factory=pin_factory)
+logger.info(f"Successfully initialized RC battery doors relay on GPIO 15: {rc_battery_doors}")
 
 # Startup indicator LEDs (3 LEDs in series) - GPIO 27 Pin 13
 startup_led = LED(27, pin_factory=pin_factory)
@@ -227,13 +202,10 @@ door_states = {
 }
 
 # RC controller PWM decoding state
-rc_pi = None
 rc_console_door_pulse = 0
 rc_battery_doors_pulse = 0
 rc_console_door_last_trigger = 0
 rc_battery_doors_last_trigger = 0
-rc_console_door_start_tick = 0
-rc_battery_doors_start_tick = 0
 rc_trigger_threshold = 1700  # Trigger when pulse > 1700us (stick pushed)
 rc_debounce_delay = 1.0  # 1 second between triggers
 
@@ -1684,71 +1656,24 @@ def input_monitor():
         print(" IR receiver callback attached - ready to receive signals")
     
     # Set up RC controller input callbacks
-    if PIGPIO_AVAILABLE and rc_pi and rc_pi.connected:
-        def rc_console_door_callback(gpio, level, tick):
-            global rc_console_door_pulse, rc_console_door_last_trigger, rc_console_door_start_tick
-            
-            if level == 1:  # Rising edge - start of pulse
-                rc_console_door_start_tick = tick
-            elif level == 0:  # Falling edge - end of pulse
-                if rc_console_door_start_tick > 0:
-                    pulse_width = pigpio.tickDiff(rc_console_door_start_tick, tick)
-                    rc_console_door_pulse = pulse_width
-                    
-                    current_time = time.time()
-                    
-                    # Log pulse width for debugging
-                    if pulse_width > 900 and pulse_width < 2100:  # Valid RC pulse range
-                        logger.debug(f"RC GPIO 14 pulse: {pulse_width}us")
-                    
-                    if pulse_width > rc_trigger_threshold and current_time - rc_console_door_last_trigger > rc_debounce_delay:
-                        logger.info(f" RC console door triggered - pulse: {pulse_width}us")
-                        print(f" RC CONSOLE DOOR TRIGGERED - pulse: {pulse_width}us")
-                        rc_console_door_last_trigger = current_time
-                        
-                        # Run the door operation in a separate thread to avoid blocking
-                        try:
-                            door_thread = Thread(target=toggle_console_door, daemon=True)
-                            door_thread.start()
-                        except Exception as e:
-                            logger.error(f"Error starting RC console door operation: {e}")
-                            print(f" Error: {e}")
+    if rc_console_door is not None and rc_battery_doors is not None:
+        def rc_console_door_pressed():
+            global door_states
+            logger.info("RC console door triggered - toggling console door")
+            print(" RC CONSOLE DOOR TRIGGERED - toggling console door")
+            toggle_console_door()
         
-        def rc_battery_doors_callback(gpio, level, tick):
-            global rc_battery_doors_pulse, rc_battery_doors_last_trigger, rc_battery_doors_start_tick
-            
-            if level == 1:  # Rising edge - start of pulse
-                rc_battery_doors_start_tick = tick
-            elif level == 0:  # Falling edge - end of pulse
-                if rc_battery_doors_start_tick > 0:
-                    pulse_width = pigpio.tickDiff(rc_battery_doors_start_tick, tick)
-                    rc_battery_doors_pulse = pulse_width
-                    
-                    current_time = time.time()
-                    
-                    # Log pulse width for debugging
-                    if pulse_width > 900 and pulse_width < 2100:  # Valid RC pulse range
-                        logger.debug(f"RC GPIO 15 pulse: {pulse_width}us")
-                    
-                    if pulse_width > rc_trigger_threshold and current_time - rc_battery_doors_last_trigger > rc_debounce_delay:
-                        logger.info(f" RC battery doors triggered - pulse: {pulse_width}us")
-                        print(f" RC BATTERY DOORS TRIGGERED - pulse: {pulse_width}us")
-                        rc_battery_doors_last_trigger = current_time
-                        
-                        # Run the door operation in a separate thread to avoid blocking
-                        try:
-                            door_thread = Thread(target=toggle_battery_doors, daemon=True)
-                            door_thread.start()
-                        except Exception as e:
-                            logger.error(f"Error starting RC battery doors operation: {e}")
-                            print(f" Error: {e}")
+        def rc_battery_doors_pressed():
+            global door_states
+            logger.info("RC battery doors triggered - toggling battery doors")
+            print(" RC BATTERY DOORS TRIGGERED - toggling battery doors")
+            toggle_battery_doors()
         
-        # Attach callbacks for both rising and falling edges
-        rc_pi.callback(14, pigpio.EITHER_EDGE, rc_console_door_callback)
-        rc_pi.callback(15, pigpio.EITHER_EDGE, rc_battery_doors_callback)
-        logger.info("RC controller PWM callbacks attached (GPIO 14, 15)")
-        print(" RC controller ready - FrSky PWM decoding active")
-        print(f"   Trigger threshold: {rc_trigger_threshold}us (push stick past this)")
+        # Attach the callbacks to the RC controller inputs
+        rc_console_door.when_pressed = rc_console_door_pressed
+        rc_battery_doors.when_pressed = rc_battery_doors_pressed
+        logger.info("RC controller input callbacks attached")
+        print(" RC controller ready - relay inputs active")
     
     # Set up red toggle switch callbacks
     if red_toggle_switch is not None:
