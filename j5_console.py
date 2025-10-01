@@ -90,18 +90,18 @@ logger.info(f"Successfully initialized red_lamp on GPIO 6: {red_lamp}")
 from gpiozero import Servo
 
 left_door = Servo(12, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000, pin_factory=pin_factory)
-left_door.value = None  # Disable PWM on startup - servo stays in current position
+left_door.value = 0.0  # Start at center position (90°)
 logger.info(f"Successfully initialized left_door servo on GPIO 12: {left_door}")
 
 # Initialize console_door servo device
 logger.info("Initializing console_door servo on GPIO pin 16")
 console_door = Servo(16, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000, pin_factory=pin_factory)
-console_door.value = None  # Disable PWM on startup - servo stays in current position
+console_door.value = 0.0  # Start at center position (90°)
 logger.info(f"Successfully initialized console_door servo: {console_door}, type: {type(console_door)}")
 
 # Initialize right_door servo device
 right_door = Servo(19, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000, pin_factory=pin_factory)
-right_door.value = None  # Disable PWM on startup - servo stays in current position
+right_door.value = 0.0  # Start at center position (90°)
 logger.info(f"Successfully initialized right_door servo on GPIO 19: {right_door}")
 
 # Initialize RC controller inputs for door control
